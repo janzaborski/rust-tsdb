@@ -3,5 +3,21 @@
 version = 4
 
 [[package]]
-name = "e2e"
+name = "tsdb-core"
+version = "0.1.0"
+
+[[package]]
+name = "tsdb-index"
+version = "0.1.0"
+
+[[package]]
+name = "tsdb-query"
+version = "0.1.0"
+
+[[package]]
+name = "tsdb-server"
+version = "0.1.0"
+
+[[package]]
+name = "tsdb-storage"
 version = "0.1.0"
