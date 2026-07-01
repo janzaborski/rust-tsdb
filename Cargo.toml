@@ -1,6 +1,6 @@
 [workspace]
 resolver="3"
-members = ["crates/tsdb-core", "crates/tsdb-index", "crates/tsdb-query", "crates/tsdb-server", "crates/tsdb-storage"]
+members = ["crates/tsdb-api","crates/tsdb-core", "crates/tsdb-engine", "crates/tsdb-query", "crates/tsdb-server"]
 
 [workspace.package]
 edition = "2024"
