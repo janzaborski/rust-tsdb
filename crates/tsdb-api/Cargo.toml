@@ -1,5 +1,5 @@
 [package]
-name = "tsdb-storage"
+name = "tsdb-api"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true

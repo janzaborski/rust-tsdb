@@ -3,11 +3,15 @@
 version = 4
 
 [[package]]
+name = "tsdb-api"
+version = "0.1.0"
+
+[[package]]
 name = "tsdb-core"
 version = "0.1.0"
 
 [[package]]
-name = "tsdb-index"
+name = "tsdb-engine"
 version = "0.1.0"
 
 [[package]]
@@ -16,8 +20,4 @@ version = "0.1.0"
 
 [[package]]
 name = "tsdb-server"
-version = "0.1.0"
-
-[[package]]
-name = "tsdb-storage"
 version = "0.1.0"
