@@ -1,14 +1,17 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod core;
+pub mod error;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use core::Database;
+pub use core::Label;
+pub use core::LabelSet;
+pub use core::Matcher;
+pub use core::Sample;
+pub use core::SampleStore;
+pub use core::SeriesId;
+pub use core::SeriesIndex;
+pub use core::SeriesResult;
+pub use core::TimeRange;
+pub use core::WriteBatch;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use error::DbError;
+pub use error::StorageError;
