@@ -7,8 +7,8 @@ use tsdb_core::{
 
 #[derive(Default)]
 pub struct Index {
-    forward: HashMap<LabelSet, SeriesId>,
-    reverse: HashMap<SeriesId, LabelSet>,
+    inverted: HashMap<LabelSet, SeriesId>,
+    forward: HashMap<SeriesId, LabelSet>,
     posting_index: HashMap<String, HashMap<String, Vec<SeriesId>>>,
     all_ids: Vec<SeriesId>,
     next_id: SeriesId,
@@ -32,15 +32,15 @@ impl PostingLookup for Index {
 
 impl SeriesIndex for Index {
     fn encode(&mut self, labels: &LabelSet) -> SeriesId {
-        if let Some(&id) = self.forward.get(labels) {
+        if let Some(&id) = self.inverted.get(labels) {
             return id;
         }
 
         let id = self.next_id;
         self.next_id.0 += 1;
 
-        self.forward.insert(labels.clone(), id);
-        self.reverse.insert(id, labels.clone());
+        self.inverted.insert(labels.clone(), id);
+        self.forward.insert(id, labels.clone());
         self.all_ids.push(id);
 
         for (name, value) in labels {
@@ -75,7 +75,7 @@ impl SeriesIndex for Index {
     }
 
     fn labels_for(&self, id: SeriesId) -> Option<LabelSet> {
-        self.reverse.get(&id).cloned()
+        self.forward.get(&id).cloned()
     }
 
     fn including_label(&self, label_name: &str) -> Vec<SeriesId> {
@@ -110,8 +110,8 @@ mod tests {
 
         let id = index.encode(&ls);
 
-        assert_eq!(index.forward.len(), 1);
-        assert_eq!(index.forward.get(&ls), Some(&id));
+        assert_eq!(index.inverted.len(), 1);
+        assert_eq!(index.inverted.get(&ls), Some(&id));
     }
 
     #[test]
@@ -123,7 +123,7 @@ mod tests {
         let id2 = index.encode(&ls);
 
         assert_eq!(id1, id2);
-        assert_eq!(index.forward.len(), 1);
+        assert_eq!(index.inverted.len(), 1);
     }
 
     #[test]
@@ -142,7 +142,7 @@ mod tests {
         let id_b = index.encode(&ls_b);
 
         assert_eq!(id_a, id_b);
-        assert_eq!(index.forward.len(), 1);
+        assert_eq!(index.inverted.len(), 1);
     }
 
     #[test]
@@ -155,7 +155,7 @@ mod tests {
         let id_b = index.encode(&ls_b);
 
         assert_ne!(id_a, id_b);
-        assert_eq!(index.forward.len(), 2);
+        assert_eq!(index.inverted.len(), 2);
     }
 
     #[test]
@@ -264,8 +264,6 @@ mod tests {
         let id_a = index.encode(&ls_a);
         index.encode(&ls_b);
 
-        // host != "" should match series that HAVE the label with a
-        // non-empty value, and exclude series lacking it entirely.
         let result = index.resolve(&[not_equal("host", "")]);
 
         assert_eq!(result, vec![id_a]);
@@ -324,4 +322,3 @@ mod tests {
         assert!(index.including_label("nonexistent").is_empty());
     }
 }
-
