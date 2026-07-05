@@ -16,4 +16,7 @@ pub enum StorageError {
 
     #[error("Failed to read samples: {0}")]
     ReadSamples(String),
+
+    #[error("Failed to create new series: {0}")]
+    CreateNewSeries(String),
 }
