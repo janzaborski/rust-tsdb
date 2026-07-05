@@ -1,5 +1,6 @@
 use super::error::{DbError, StorageError};
-use std::collections::BTreeMap;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Label {
@@ -109,6 +110,7 @@ impl TimeRange {
 #[derive(Debug, Clone, Copy)]
 pub enum MatcherOperator {
     Equal,
+    NotEqual,
 }
 
 /// For now same shit as Label, but will become helpful when we implement matchers and operators
@@ -120,19 +122,128 @@ pub struct Matcher {
 }
 
 impl Matcher {
-    pub fn matches(&self, label_value: &str) -> bool {
-        match self.operator {
-            MatcherOperator::Equal => self.value == label_value,
-        }
-    }
-
-    pub fn new(name: String, value: String, operator: MatcherOperator) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        value: impl Into<String>,
+        operator: MatcherOperator,
+    ) -> Self {
         Self {
-            name,
-            value,
+            name: name.into(),
+            value: value.into(),
             operator,
         }
     }
+
+    pub fn equal(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self::new(name, value, MatcherOperator::Equal)
+    }
+
+    pub fn matches(&self, label_value: &str) -> bool {
+        match self.operator {
+            MatcherOperator::Equal => self.value == label_value,
+            MatcherOperator::NotEqual => self.value != label_value,
+        }
+    }
+
+    pub fn candidates<'a>(&self, lookup: &'a impl PostingLookup) -> Cow<'a, [SeriesId]> {
+        match self.operator {
+            MatcherOperator::Equal => lookup
+                .values_for(&self.name)
+                .and_then(|v| v.get(&self.value))
+                .map(|ids| Cow::Borrowed(ids.as_slice()))
+                .unwrap_or(Cow::Owned(Vec::new())),
+
+            MatcherOperator::NotEqual => {
+                let values = lookup.values_for(&self.name);
+                let with_label: Vec<SeriesId> = values.map(union_all).unwrap_or_default();
+                let with_this_value: &[SeriesId] = values
+                    .and_then(|v| v.get(&self.value))
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+
+                let mut result = difference_sorted(&with_label, with_this_value);
+
+                if !self.value.is_empty() {
+                    let without_label = difference_sorted(lookup.universe(), &with_label);
+                    result = union_sorted(&result, &without_label);
+                }
+                Cow::Owned(result)
+            }
+        }
+    }
+}
+
+pub fn union_sorted(a: &[SeriesId], b: &[SeriesId]) -> Vec<SeriesId> {
+    let mut result = Vec::with_capacity(a.len() + b.len());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        match a[i].0.cmp(&b[j].0) {
+            std::cmp::Ordering::Less => {
+                result.push(a[i]);
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                result.push(b[j]);
+                j += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                result.push(a[i]);
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    result.extend_from_slice(&a[i..]);
+    result.extend_from_slice(&b[j..]);
+    result
+}
+
+pub fn difference_sorted(a: &[SeriesId], b: &[SeriesId]) -> Vec<SeriesId> {
+    let mut result = Vec::with_capacity(a.len());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        match a[i].0.cmp(&b[j].0) {
+            std::cmp::Ordering::Less => {
+                result.push(a[i]);
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => j += 1,
+            std::cmp::Ordering::Equal => {
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    result.extend_from_slice(&a[i..]);
+    result
+}
+
+pub fn intersect_in_place(a: &mut Vec<SeriesId>, b: &[SeriesId]) {
+    let (mut write, mut i, mut j) = (0, 0, 0);
+    while i < a.len() && j < b.len() {
+        match a[i].0.cmp(&b[j].0) {
+            std::cmp::Ordering::Less => i += 1,
+            std::cmp::Ordering::Greater => j += 1,
+            std::cmp::Ordering::Equal => {
+                a[write] = a[i];
+                write += 1;
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    a.truncate(write);
+}
+
+pub fn union_all(values: &std::collections::HashMap<String, Vec<SeriesId>>) -> Vec<SeriesId> {
+    values
+        .values()
+        .fold(Vec::new(), |acc, v| union_sorted(&acc, v))
+}
+
+pub trait PostingLookup {
+    fn values_for(&self, name: &str) -> Option<&HashMap<String, Vec<SeriesId>>>;
+    fn universe(&self) -> &[SeriesId];
 }
 
 pub trait SampleStore {

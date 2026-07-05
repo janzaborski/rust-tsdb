@@ -1,9 +1,16 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
-use tsdb_core::{LabelSet, Matcher, SeriesId, SeriesIndex};
+
+use tsdb_core::{
+    LabelSet, Matcher, PostingLookup, SeriesId, SeriesIndex, intersect_in_place, union_all,
+};
 
 #[derive(Default)]
 pub struct Index {
-    index: HashMap<LabelSet, SeriesId>,
+    forward: HashMap<LabelSet, SeriesId>,
+    reverse: HashMap<SeriesId, LabelSet>,
+    posting_index: HashMap<String, HashMap<String, Vec<SeriesId>>>,
+    all_ids: Vec<SeriesId>,
     next_id: SeriesId,
 }
 
@@ -13,43 +20,69 @@ impl Index {
     }
 }
 
+impl PostingLookup for Index {
+    fn values_for(&self, name: &str) -> Option<&HashMap<String, Vec<SeriesId>>> {
+        self.posting_index.get(name)
+    }
+
+    fn universe(&self) -> &[SeriesId] {
+        &self.all_ids
+    }
+}
+
 impl SeriesIndex for Index {
     fn encode(&mut self, labels: &LabelSet) -> SeriesId {
-        if let Some(&id) = self.index.get(labels) {
+        if let Some(&id) = self.forward.get(labels) {
             return id;
         }
+
         let id = self.next_id;
         self.next_id.0 += 1;
-        self.index.insert(labels.clone(), id);
+
+        self.forward.insert(labels.clone(), id);
+        self.reverse.insert(id, labels.clone());
+        self.all_ids.push(id);
+
+        for (name, value) in labels {
+            self.posting_index
+                .entry(name.clone())
+                .or_default()
+                .entry(value.clone())
+                .or_default()
+                .push(id);
+        }
+
         id
     }
 
     fn resolve(&self, matchers: &[Matcher]) -> Vec<SeriesId> {
-        self.index
-            .iter()
-            .filter(|(ls, _)| {
-                matchers.iter().all(|m| {
-                    ls.get(m.name.as_str())
-                        .map_or_else(|| m.matches(""), |v| m.matches(v))
-                })
-            })
-            .map(|(_, id)| *id)
-            .collect()
+        if matchers.is_empty() {
+            return self.all_ids.clone();
+        }
+
+        let mut iter = matchers.iter();
+        let mut candidates: Cow<[SeriesId]> = iter.next().unwrap().candidates(self);
+
+        for m in iter {
+            let this_set = m.candidates(self);
+            intersect_in_place(candidates.to_mut(), &this_set);
+            if candidates.is_empty() {
+                return Vec::new();
+            }
+        }
+
+        candidates.into_owned()
     }
 
     fn labels_for(&self, id: SeriesId) -> Option<LabelSet> {
-        self.index
-            .iter()
-            .find(|(_, tid)| **tid == id)
-            .map(|(ls, _)| ls.clone())
+        self.reverse.get(&id).cloned()
     }
 
     fn including_label(&self, label_name: &str) -> Vec<SeriesId> {
-        self.index
-            .iter()
-            .filter(|(ls, _)| ls.get(label_name).is_some())
-            .map(|(_, id)| *id)
-            .collect()
+        self.posting_index
+            .get(label_name)
+            .map(union_all)
+            .unwrap_or_default()
     }
 }
 
@@ -66,8 +99,8 @@ mod tests {
         set
     }
 
-    fn eq_matcher(name: &str, value: &str) -> Matcher {
-        Matcher::new(name.into(), value.into(), MatcherOperator::Equal)
+    fn not_equal(name: &str, value: &str) -> Matcher {
+        Matcher::new(name, value, MatcherOperator::NotEqual)
     }
 
     #[test]
@@ -77,8 +110,8 @@ mod tests {
 
         let id = index.encode(&ls);
 
-        assert_eq!(index.index.len(), 1);
-        assert_eq!(index.index.get(&ls), Some(&id));
+        assert_eq!(index.forward.len(), 1);
+        assert_eq!(index.forward.get(&ls), Some(&id));
     }
 
     #[test]
@@ -90,7 +123,7 @@ mod tests {
         let id2 = index.encode(&ls);
 
         assert_eq!(id1, id2);
-        assert_eq!(index.index.len(), 1);
+        assert_eq!(index.forward.len(), 1);
     }
 
     #[test]
@@ -109,7 +142,7 @@ mod tests {
         let id_b = index.encode(&ls_b);
 
         assert_eq!(id_a, id_b);
-        assert_eq!(index.index.len(), 1);
+        assert_eq!(index.forward.len(), 1);
     }
 
     #[test]
@@ -122,7 +155,7 @@ mod tests {
         let id_b = index.encode(&ls_b);
 
         assert_ne!(id_a, id_b);
-        assert_eq!(index.index.len(), 2);
+        assert_eq!(index.forward.len(), 2);
     }
 
     #[test]
@@ -138,55 +171,104 @@ mod tests {
     }
 
     #[test]
-    fn resolve_matches_single_matcher() {
+    fn encode_maintains_sorted_posting_lists_and_universe() {
+        let mut index = Index::new();
+        let ls_a = label_set(&[("host", "a")]);
+        let ls_b = label_set(&[("host", "a")]);
+        let id_a = index.encode(&ls_a);
+        let id_b = index.encode(&ls_b); // duplicate labels -> same id, no new entries
+
+        assert_eq!(id_a, id_b);
+        assert_eq!(index.all_ids, vec![id_a]);
+        assert_eq!(
+            index.posting_index.get("host").unwrap().get("a").unwrap(),
+            &vec![id_a]
+        );
+    }
+
+    #[test]
+    fn resolve_equal_matches_single_matcher() {
         let mut index = Index::new();
         let ls_a = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let ls_b = label_set(&[("__name__", "mem"), ("host", "a")]);
         let id_a = index.encode(&ls_a);
-        let _id_b = index.encode(&ls_b);
+        index.encode(&ls_b);
 
-        let matchers = vec![eq_matcher("__name__", "cpu")];
-        let result = index.resolve(&matchers);
+        let result = index.resolve(&[Matcher::equal("__name__", "cpu")]);
 
         assert_eq!(result, vec![id_a]);
     }
 
     #[test]
-    fn resolve_matches_multiple_matchers_as_and() {
+    fn resolve_equal_matches_multiple_matchers_as_and() {
         let mut index = Index::new();
         let ls_a = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let ls_b = label_set(&[("__name__", "cpu"), ("host", "b")]);
         let id_a = index.encode(&ls_a);
-        let _id_b = index.encode(&ls_b);
+        index.encode(&ls_b);
 
-        let matchers = vec![eq_matcher("__name__", "cpu"), eq_matcher("host", "a")];
-        let result = index.resolve(&matchers);
+        let result = index.resolve(&[
+            Matcher::equal("__name__", "cpu"),
+            Matcher::equal("host", "a"),
+        ]);
 
         assert_eq!(result, vec![id_a]);
     }
 
     #[test]
-    fn resolve_returns_empty_when_nothing_matches() {
+    fn resolve_returns_empty_when_value_never_indexed() {
         let mut index = Index::new();
         let ls = label_set(&[("__name__", "cpu")]);
         index.encode(&ls);
 
-        let matchers = vec![eq_matcher("__name__", "mem")];
-        let result = index.resolve(&matchers);
+        let result = index.resolve(&[Matcher::equal("__name__", "mem")]);
 
         assert!(result.is_empty());
     }
 
     #[test]
-    fn resolve_treats_missing_label_as_empty_string() {
+    fn resolve_not_equal_matches_different_value() {
         let mut index = Index::new();
-        let ls = label_set(&[("__name__", "cpu")]); // no "host" label
-        index.encode(&ls);
+        let ls_a = label_set(&[("host", "a")]);
+        let ls_b = label_set(&[("host", "b")]);
+        let id_a = index.encode(&ls_a);
+        let id_b = index.encode(&ls_b);
 
-        let matchers = vec![eq_matcher("host", "a")];
-        let result = index.resolve(&matchers);
+        let mut result = index.resolve(&[not_equal("host", "a")]);
+        result.sort_by_key(|id| id.0);
 
-        assert!(result.is_empty());
+        assert_eq!(result, vec![id_b]);
+        assert!(!result.contains(&id_a));
+    }
+
+    #[test]
+    fn resolve_not_equal_includes_series_missing_the_label() {
+        let mut index = Index::new();
+        let ls_a = label_set(&[("host", "a")]);
+        let ls_b = label_set(&[("__name__", "cpu")]); // no "host" label at all
+        let id_a = index.encode(&ls_a);
+        let id_b = index.encode(&ls_b);
+
+        let mut result = index.resolve(&[not_equal("host", "a")]);
+        result.sort_by_key(|id| id.0);
+
+        assert_eq!(result, vec![id_b]);
+        assert!(!result.contains(&id_a));
+    }
+
+    #[test]
+    fn resolve_not_equal_against_empty_string_excludes_missing_label() {
+        let mut index = Index::new();
+        let ls_a = label_set(&[("host", "a")]);
+        let ls_b = label_set(&[("__name__", "cpu")]); // no "host" label -> treated as ""
+        let id_a = index.encode(&ls_a);
+        index.encode(&ls_b);
+
+        // host != "" should match series that HAVE the label with a
+        // non-empty value, and exclude series lacking it entirely.
+        let result = index.resolve(&[not_equal("host", "")]);
+
+        assert_eq!(result, vec![id_a]);
     }
 
     #[test]
@@ -210,31 +292,27 @@ mod tests {
         let ls = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let id = index.encode(&ls);
 
-        let result = index.labels_for(id);
-
-        assert_eq!(result, Some(ls));
+        assert_eq!(index.labels_for(id), Some(ls));
     }
 
     #[test]
     fn labels_for_returns_none_for_unknown_id() {
         let index = Index::new();
-
-        let result = index.labels_for(SeriesId(999));
-
-        assert_eq!(result, None);
+        assert_eq!(index.labels_for(SeriesId(999)), None);
     }
 
     #[test]
-    fn including_label_returns_series_with_label_present() {
+    fn including_label_returns_series_across_multiple_values() {
         let mut index = Index::new();
-        let ls_a = label_set(&[("__name__", "cpu"), ("host", "a")]);
-        let ls_b = label_set(&[("__name__", "mem")]); // no "host"
+        let ls_a = label_set(&[("host", "a")]);
+        let ls_b = label_set(&[("host", "b")]);
         let id_a = index.encode(&ls_a);
-        let _id_b = index.encode(&ls_b);
+        let id_b = index.encode(&ls_b);
 
-        let result = index.including_label("host");
+        let mut result = index.including_label("host");
+        result.sort_by_key(|id| id.0);
 
-        assert_eq!(result, vec![id_a]);
+        assert_eq!(result, vec![id_a, id_b]);
     }
 
     #[test]
@@ -243,8 +321,7 @@ mod tests {
         let ls = label_set(&[("__name__", "cpu")]);
         index.encode(&ls);
 
-        let result = index.including_label("nonexistent");
-
-        assert!(result.is_empty());
+        assert!(index.including_label("nonexistent").is_empty());
     }
 }
+
