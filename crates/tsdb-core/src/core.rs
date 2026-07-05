@@ -32,22 +32,38 @@ impl LabelSet {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub struct Sample {
     /// in miliseconds since epoch
     pub timestamp: u64,
     pub value: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl Sample {
+    pub fn new(timestamp: u64, value: f64) -> Self {
+        Self { timestamp, value }
+    }
+
+    pub fn in_timerange(self, range: TimeRange) -> bool {
+        self.timestamp >= range.start && self.timestamp <= range.end
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SeriesId(pub u64);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimeRange {
     /// in miliseconds since epoch
     pub start: u64,
     /// in miliseconds since epoch
     pub end: u64,
+}
+
+impl TimeRange {
+    pub fn new(start: u64, end: u64) -> Self {
+        Self { start, end }
+    }
 }
 
 /// For now same shit as Label, but will become helpful when we implement matchers and operators
@@ -59,7 +75,7 @@ pub struct Matcher {
 
 pub trait SampleStore {
     /// Appends a sample to the series identified by the given series ID.
-    fn append(&self, id: SeriesId, sample: Sample) -> Result<(), StorageError>;
+    fn append(&mut self, id: SeriesId, sample: Sample) -> Result<(), StorageError>;
 
     /// Reads samples from the series identified by the given series ID within the specified time range.
     fn read(&self, id: SeriesId, range: TimeRange) -> Result<Vec<Sample>, StorageError>;

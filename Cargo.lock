@@ -65,6 +65,9 @@ dependencies = [
 [[package]]
 name = "tsdb-engine"
 version = "0.1.0"
+dependencies = [
+ "tsdb-core",
+]
 
 [[package]]
 name = "tsdb-query"

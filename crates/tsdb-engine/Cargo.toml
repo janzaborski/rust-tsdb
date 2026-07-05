@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+tsdb-core = { path = "../tsdb-core" }
 
 [lints]
 workspace = true
