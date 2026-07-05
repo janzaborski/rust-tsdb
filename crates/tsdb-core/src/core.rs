@@ -49,12 +49,6 @@ impl Sample {
     }
 }
 
-impl From<(u64, f64)> for Sample {
-    fn from((timestamp, value): (u64, f64)) -> Self {
-        Self { timestamp, value }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SeriesId(pub u64);
 
