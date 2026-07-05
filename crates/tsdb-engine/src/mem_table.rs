@@ -13,25 +13,8 @@ impl MemTable {
 }
 
 impl SampleStore for MemTable {
-    fn create_new_series(&mut self, id: SeriesId) -> Result<(), StorageError> {
-        match self.data.entry(id) {
-            std::collections::hash_map::Entry::Occupied(_) => Err(StorageError::CreateNewSeries(
-                format!("Sereis with Id: {id:?} already exists"),
-            )),
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(Vec::new());
-                Ok(())
-            }
-        }
-    }
-
     fn append(&mut self, id: SeriesId, sample: Sample) -> Result<(), StorageError> {
-        let series = self
-            .data
-            .get_mut(&id)
-            .ok_or_else(|| StorageError::AppendSample(format!("no Series with id: {id:?}")))?;
-
-        series.push(sample);
+        self.data.entry(id).or_default().push(sample);
         Ok(())
     }
 
@@ -53,57 +36,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn create_new_series_succeeds_for_new_id() {
+    fn append_creates_new_series() {
         let mut store = MemTable::new();
         let id = SeriesId(1);
 
-        let result = store.create_new_series(id);
-
-        assert!(result.is_ok());
-        assert!(store.data.get(&id).unwrap().is_empty());
-    }
-
-    #[test]
-    fn create_new_series_fails_if_already_exists() {
-        let mut store = MemTable::new();
-        let id = SeriesId(1);
-
-        store.create_new_series(id).unwrap();
-        let result = store.create_new_series(id);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn create_new_series_does_not_overwrite_existing_data() {
-        let mut store = MemTable::new();
-        let id = SeriesId(1);
-
-        store.create_new_series(id).unwrap();
-        store.append(id, Sample::new(100, 1.0)).unwrap();
-
-        let result = store.create_new_series(id);
-
-        assert!(result.is_err());
-        assert_eq!(store.data.get(&id).unwrap().len(), 1);
-    }
-
-    #[test]
-    fn append_fails_if_series_not_created() {
-        let mut store = MemTable::new();
-        let id = SeriesId(1);
-
-        let result = store.append(id, Sample::new(100, 1.0));
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn append_succeeds_after_series_created() {
-        let mut store = MemTable::new();
-        let id = SeriesId(1);
-
-        store.create_new_series(id).unwrap();
         store.append(id, Sample::new(100, 1.0)).unwrap();
 
         assert_eq!(store.data.get(&id).unwrap().len(), 1);
@@ -114,7 +50,6 @@ mod tests {
         let mut store = MemTable::new();
         let id = SeriesId(1);
 
-        store.create_new_series(id).unwrap();
         store.append(id, Sample::new(100, 1.0)).unwrap();
         store.append(id, Sample::new(200, 2.0)).unwrap();
 
@@ -130,8 +65,6 @@ mod tests {
         let id_a = SeriesId(1);
         let id_b = SeriesId(2);
 
-        store.create_new_series(id_a).unwrap();
-        store.create_new_series(id_b).unwrap();
         store.append(id_a, Sample::new(100, 1.0)).unwrap();
         store.append(id_b, Sample::new(100, 2.0)).unwrap();
 
@@ -155,7 +88,6 @@ mod tests {
         let mut store = MemTable::new();
         let id = SeriesId(1);
 
-        store.create_new_series(id).unwrap();
         store.append(id, Sample::new(100, 1.0)).unwrap();
         store.append(id, Sample::new(200, 2.0)).unwrap();
         store.append(id, Sample::new(300, 3.0)).unwrap();
@@ -171,7 +103,6 @@ mod tests {
         let mut store = MemTable::new();
         let id = SeriesId(1);
 
-        store.create_new_series(id).unwrap();
         store.append(id, Sample::new(100, 1.0)).unwrap();
 
         let range = TimeRange::new(500, 600);
@@ -186,8 +117,6 @@ mod tests {
         let id_a = SeriesId(1);
         let id_b = SeriesId(2);
 
-        store.create_new_series(id_a).unwrap();
-        store.create_new_series(id_b).unwrap();
         store.append(id_a, Sample::new(100, 1.0)).unwrap();
         store.append(id_b, Sample::new(100, 2.0)).unwrap();
 

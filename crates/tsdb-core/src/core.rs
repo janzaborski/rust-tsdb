@@ -74,9 +74,6 @@ pub struct Matcher {
 }
 
 pub trait SampleStore {
-    /// adds a new series entry
-    fn create_new_series(&mut self, id: SeriesId) -> Result<(), StorageError>;
-
     /// Appends a sample to the series identified by the given series ID.
     fn append(&mut self, id: SeriesId, sample: Sample) -> Result<(), StorageError>;
 
