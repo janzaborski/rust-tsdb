@@ -44,7 +44,7 @@ impl Sample {
         Self { timestamp, value }
     }
 
-    pub fn in_timerange(&self, range: TimeRange) -> bool {
+    pub fn in_timerange(self, range: TimeRange) -> bool {
         self.timestamp >= range.start && self.timestamp <= range.end
     }
 }
