@@ -1,13 +1,13 @@
 use super::error::{DbError, StorageError};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Label {
     pub name: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LabelSet(Vec<Label>);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LabelSet(pub Vec<Label>);
 
 impl LabelSet {
     /// Normalizes the label set by sorting the labels by name.
@@ -49,7 +49,7 @@ impl Sample {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SeriesId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,11 +66,23 @@ impl TimeRange {
     }
 }
 
+pub enum MatcherOperator {
+    Equal,
+}
+
 /// For now same shit as Label, but will become helpful when we implement matchers and operators
 pub struct Matcher {
     pub name: String,
     pub value: String,
-    // pub operator: MatcherOperator,
+    pub operator: MatcherOperator,
+}
+
+impl Matcher {
+    pub fn matches(&self, label_value: &str) -> bool {
+        match self.operator {
+            MatcherOperator::Equal => self.value == label_value,
+        }
+    }
 }
 
 pub trait SampleStore {
@@ -84,13 +96,15 @@ pub trait SampleStore {
 pub trait SeriesIndex {
     /// Encodes a label set and returns a unique series ID for it.
     /// If the label set has already been encoded, it returns the existing series ID.
-    fn encode(&self, labels: &LabelSet) -> SeriesId;
+    fn encode(&mut self, labels: &LabelSet) -> SeriesId;
 
     /// Resolves a label set to a list of series IDs that match the label set.
     fn resolve(&self, matchers: &[Matcher]) -> Vec<SeriesId>;
 
     /// Returns the label set for a given series ID, if it exists.
     fn labels_for(&self, id: SeriesId) -> Option<LabelSet>;
+
+    fn including_label(&self, label_name: &str) -> Vec<SeriesId>;
 }
 
 /// TODO: dunno if parts below shouldnt be defined in tsdb-api, cuz its not neccessarily domain
