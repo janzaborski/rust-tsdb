@@ -1,4 +1,4 @@
-use super::error::{DbError, StorageError};
+use super::error::StorageError;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -142,27 +142,6 @@ pub trait SeriesIndex {
     fn labels_for(&self, id: SeriesId) -> Option<LabelSet>;
 
     fn including_label(&self, label_name: &str) -> Vec<SeriesId>;
-}
-
-/// TODO: dunno if parts below shouldnt be defined in tsdb-api, cuz its not neccessarily domain
-#[derive(Debug, Clone, PartialEq)]
-pub struct WriteBatch {
-    pub series: Vec<(LabelSet, Vec<Sample>)>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SeriesResult {
-    pub labels: LabelSet,
-    pub samples: Vec<Sample>,
-}
-
-/// database facade
-pub trait Database: Send + Sync {
-    /// Writes a batch of series data to the database.
-    fn write(&self, batch: WriteBatch) -> Result<(), DbError>;
-
-    /// Queries the database for series that match the given label sets and time range.
-    fn query(&self, matchers: &[Matcher], range: TimeRange) -> Result<Vec<SeriesResult>, DbError>;
 }
 
 #[cfg(test)]
