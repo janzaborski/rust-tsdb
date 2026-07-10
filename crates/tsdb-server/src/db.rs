@@ -2,21 +2,26 @@ use std::sync::RwLock;
 
 use tsdb_api::{Database, SeriesResult, WriteBatch};
 use tsdb_core::{DbError, Matcher, SampleStore, SeriesIndex, TimeRange};
-use tsdb_engine::{Index, MemTable};
 
-#[derive(Default)]
-pub struct Db {
-    store: RwLock<MemTable>,
-    index: RwLock<Index>,
+pub struct Db<S, I> {
+    store: RwLock<S>,
+    index: RwLock<I>,
 }
 
-impl Db {
-    pub fn new() -> Self {
-        Self::default()
+impl<S, I> Db<S, I> {
+    pub fn new(store: S, index: I) -> Self {
+        Self {
+            store: RwLock::new(store),
+            index: RwLock::new(index),
+        }
     }
 }
 
-impl Database for Db {
+impl<S, I> Database for Db<S, I>
+where
+    S: SampleStore + Send + Sync,
+    I: SeriesIndex + Send + Sync,
+{
     fn write(&self, batch: WriteBatch) -> Result<(), DbError> {
         for (labels, samples) in batch.series {
             let id = self.index.write().unwrap().encode(&labels);
