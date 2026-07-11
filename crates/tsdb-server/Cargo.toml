@@ -7,6 +7,18 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+tsdb-core = { path = "../tsdb-core" }
+tsdb-api = { path = "../tsdb-api" }
+tsdb-engine = { path = "../tsdb-engine" }
+axum = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
