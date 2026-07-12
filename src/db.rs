@@ -1,13 +1,8 @@
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 use crate::model::{LabelSet, Matcher, Sample, TimeRange};
-use crate::storage::{Index, MemTable, SampleStore, SeriesIndex, StorageError};
+use crate::storage::{Index, MemTable, StorageError};
 use thiserror::Error;
-
-pub trait Database: Send + Sync {
-    fn write(&self, batch: WriteBatch) -> Result<(), DbError>;
-    fn query(&self, matchers: &[Matcher], range: TimeRange) -> Result<Vec<SeriesResult>, DbError>;
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WriteBatch {
@@ -29,30 +24,20 @@ pub enum DbError {
     InvalidWriteBatch(String),
 }
 
-pub struct Db<S, I> {
-    store: RwLock<S>,
-    index: RwLock<I>,
+pub struct Db {
+    store: RwLock<MemTable>,
+    index: RwLock<Index>,
 }
 
-impl<S, I> Db<S, I> {
-    pub fn new(store: S, index: I) -> Self {
+impl Db {
+    pub fn new() -> Self {
         Self {
-            store: RwLock::new(store),
-            index: RwLock::new(index),
+            store: RwLock::new(MemTable::new()),
+            index: RwLock::new(Index::new()),
         }
     }
-}
 
-pub fn new_in_memory_database() -> Arc<dyn Database> {
-    Arc::new(Db::new(MemTable::new(), Index::new()))
-}
-
-impl<S, I> Database for Db<S, I>
-where
-    S: SampleStore + Send + Sync,
-    I: SeriesIndex + Send + Sync,
-{
-    fn write(&self, batch: WriteBatch) -> Result<(), DbError> {
+    pub fn write(&self, batch: WriteBatch) -> Result<(), DbError> {
         for (labels, samples) in batch.series {
             let id = self.index.write().unwrap().encode(&labels);
             let mut store = self.store.write().unwrap();
@@ -63,7 +48,11 @@ where
         Ok(())
     }
 
-    fn query(&self, matchers: &[Matcher], range: TimeRange) -> Result<Vec<SeriesResult>, DbError> {
+    pub fn query(
+        &self,
+        matchers: &[Matcher],
+        range: TimeRange,
+    ) -> Result<Vec<SeriesResult>, DbError> {
         let index = self.index.read().unwrap();
         let store = self.store.read().unwrap();
 
@@ -75,5 +64,11 @@ where
             }
         }
         Ok(out)
+    }
+}
+
+impl Default for Db {
+    fn default() -> Self {
+        Self::new()
     }
 }

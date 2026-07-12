@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use clap::Parser;
-use tsdb::{new_in_memory_database, router};
+use tsdb::{Db, router};
 
 #[derive(Parser)]
 struct Args {
@@ -12,7 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
-    let app = router(new_in_memory_database());
+    let app = router(Arc::new(Db::new()));
 
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
     tracing::info!("listening on {}", args.listen);

@@ -1,12 +1,14 @@
+use std::sync::Arc;
+
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
 use tower::ServiceExt;
-use tsdb::{new_in_memory_database, router};
+use tsdb::{Db, router};
 
 #[tokio::test]
 async fn write_then_read_roundtrips() {
-    let app = router(new_in_memory_database());
+    let app = router(Arc::new(Db::new()));
 
     let write_body = json!([{
         "labels": {"__name__": "cpu_usage", "host": "abc"},

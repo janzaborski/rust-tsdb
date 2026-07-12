@@ -1,5 +1,5 @@
 use crate::model::{Sample, SeriesId, TimeRange};
-use crate::storage::{SampleStore, StorageError};
+use crate::storage::StorageError;
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -13,13 +13,13 @@ impl MemTable {
     }
 }
 
-impl SampleStore for MemTable {
-    fn append(&mut self, id: SeriesId, sample: Sample) -> Result<(), StorageError> {
+impl MemTable {
+    pub fn append(&mut self, id: SeriesId, sample: Sample) -> Result<(), StorageError> {
         self.data.entry(id).or_default().push(sample);
         Ok(())
     }
 
-    fn read(&self, id: SeriesId, range: TimeRange) -> Result<Vec<Sample>, StorageError> {
+    pub fn read(&self, id: SeriesId, range: TimeRange) -> Result<Vec<Sample>, StorageError> {
         let series = self.data.get(&id).ok_or(StorageError::ReadSamples(format!(
             "no Series with Id: {id:?}"
         )))?;

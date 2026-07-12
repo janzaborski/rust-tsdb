@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::model::{LabelSet, Matcher, MatcherOperator, SeriesId};
-use crate::storage::SeriesIndex;
 
 #[derive(Default)]
 pub struct Index {
@@ -47,8 +46,8 @@ impl Index {
     }
 }
 
-impl SeriesIndex for Index {
-    fn encode(&mut self, labels: &LabelSet) -> SeriesId {
+impl Index {
+    pub fn encode(&mut self, labels: &LabelSet) -> SeriesId {
         if let Some(&id) = self.inverted.get(labels) {
             return id;
         }
@@ -73,7 +72,7 @@ impl SeriesIndex for Index {
     }
 
     /// On empty matchers returns all series ids.
-    fn resolve(&self, matchers: &[Matcher]) -> Vec<SeriesId> {
+    pub fn resolve(&self, matchers: &[Matcher]) -> Vec<SeriesId> {
         if matchers.is_empty() {
             return self.all_ids.clone();
         }
@@ -92,11 +91,11 @@ impl SeriesIndex for Index {
         candidates.into_owned()
     }
 
-    fn labels_for(&self, id: SeriesId) -> Option<LabelSet> {
+    pub fn labels_for(&self, id: SeriesId) -> Option<LabelSet> {
         self.forward.get(&id).cloned()
     }
 
-    fn including_label(&self, label_name: &str) -> Vec<SeriesId> {
+    pub fn including_label(&self, label_name: &str) -> Vec<SeriesId> {
         self.posting_index
             .get(label_name)
             .map(union_all)
