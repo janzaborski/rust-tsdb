@@ -1,17 +1,12 @@
-use std::sync::Arc;
-
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
 use tower::ServiceExt;
-use tsdb_api::Database;
-use tsdb_engine::{Index, MemTable};
-use tsdb_server::Db;
+use tsdb::{new_in_memory_database, router};
 
 #[tokio::test]
 async fn write_then_read_roundtrips() {
-    let db: Arc<dyn Database> = Arc::new(Db::new(MemTable::new(), Index::new()));
-    let app = tsdb_api::router(db);
+    let app = router(new_in_memory_database());
 
     let write_body = json!([{
         "labels": {"__name__": "cpu_usage", "host": "abc"},

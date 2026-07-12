@@ -1,5 +1,6 @@
+use crate::model::{Sample, SeriesId, TimeRange};
+use crate::storage::{SampleStore, StorageError};
 use std::collections::HashMap;
-use tsdb_core::{Sample, SampleStore, SeriesId, StorageError, TimeRange};
 
 #[derive(Default)]
 pub struct MemTable {

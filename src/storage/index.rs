@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use tsdb_core::{LabelSet, Matcher, MatcherOperator, SeriesId, SeriesIndex};
+use crate::model::{LabelSet, Matcher, MatcherOperator, SeriesId};
+use crate::storage::SeriesIndex;
 
 #[derive(Default)]
 pub struct Index {
@@ -174,7 +175,7 @@ fn union_all(values: &HashMap<String, Vec<SeriesId>>) -> Vec<SeriesId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tsdb_core::{Label, MatcherOperator};
+    use crate::model::{Label, MatcherOperator};
 
     fn label_set(pairs: &[(&str, &str)]) -> LabelSet {
         let mut set = LabelSet::new();

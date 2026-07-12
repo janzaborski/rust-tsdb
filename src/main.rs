@@ -1,9 +1,5 @@
-use std::sync::Arc;
-
 use clap::Parser;
-use tsdb_api::Database;
-use tsdb_engine::{Index, MemTable};
-use tsdb_server::Db;
+use tsdb::{new_in_memory_database, router};
 
 #[derive(Parser)]
 struct Args {
@@ -16,8 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
-    let db: Arc<dyn Database> = Arc::new(Db::new(MemTable::new(), Index::new()));
-    let app = tsdb_api::router(db);
+    let app = router(new_in_memory_database());
 
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
     tracing::info!("listening on {}", args.listen);

@@ -1,7 +1,33 @@
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
-use tsdb_api::{Database, SeriesResult, WriteBatch};
-use tsdb_core::{DbError, Matcher, SampleStore, SeriesIndex, TimeRange};
+use crate::model::{LabelSet, Matcher, Sample, TimeRange};
+use crate::storage::{Index, MemTable, SampleStore, SeriesIndex, StorageError};
+use thiserror::Error;
+
+pub trait Database: Send + Sync {
+    fn write(&self, batch: WriteBatch) -> Result<(), DbError>;
+    fn query(&self, matchers: &[Matcher], range: TimeRange) -> Result<Vec<SeriesResult>, DbError>;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WriteBatch {
+    pub series: Vec<(LabelSet, Vec<Sample>)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeriesResult {
+    pub labels: LabelSet,
+    pub samples: Vec<Sample>,
+}
+
+#[derive(Error, Debug)]
+pub enum DbError {
+    #[error(transparent)]
+    Storage(#[from] StorageError),
+
+    #[error("Invalid write batch: {0}")]
+    InvalidWriteBatch(String),
+}
 
 pub struct Db<S, I> {
     store: RwLock<S>,
@@ -15,6 +41,10 @@ impl<S, I> Db<S, I> {
             index: RwLock::new(index),
         }
     }
+}
+
+pub fn new_in_memory_database() -> Arc<dyn Database> {
+    Arc::new(Db::new(MemTable::new(), Index::new()))
 }
 
 impl<S, I> Database for Db<S, I>
