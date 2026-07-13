@@ -1,4 +1,3 @@
-use super::error::StorageError;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -120,28 +119,6 @@ impl Matcher {
             operator,
         }
     }
-}
-
-pub trait SampleStore {
-    /// Appends a sample to the series identified by the given series ID.
-    fn append(&mut self, id: SeriesId, sample: Sample) -> Result<(), StorageError>;
-
-    /// Reads samples from the series identified by the given series ID within the specified time range.
-    fn read(&self, id: SeriesId, range: TimeRange) -> Result<Vec<Sample>, StorageError>;
-}
-
-pub trait SeriesIndex {
-    /// Encodes a label set and returns a unique series ID for it.
-    /// If the label set has already been encoded, it returns the existing series ID.
-    fn encode(&mut self, labels: &LabelSet) -> SeriesId;
-
-    /// Resolves a label set to a list of series IDs that match the label set.
-    fn resolve(&self, matchers: &[Matcher]) -> Vec<SeriesId>;
-
-    /// Returns the label set for a given series ID, if it exists.
-    fn labels_for(&self, id: SeriesId) -> Option<LabelSet>;
-
-    fn including_label(&self, label_name: &str) -> Vec<SeriesId>;
 }
 
 #[cfg(test)]

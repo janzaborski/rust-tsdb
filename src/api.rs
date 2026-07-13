@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::db::{Db, SeriesResult, WriteBatch};
+use crate::model::{Label, LabelSet, Matcher, MatcherOperator, Sample, TimeRange};
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -10,25 +12,8 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tsdb_core::{DbError, Label, LabelSet, Matcher, MatcherOperator, Sample, TimeRange};
 
-pub trait Database: Send + Sync {
-    fn write(&self, batch: WriteBatch) -> Result<(), DbError>;
-    fn query(&self, matchers: &[Matcher], range: TimeRange) -> Result<Vec<SeriesResult>, DbError>;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct WriteBatch {
-    pub series: Vec<(LabelSet, Vec<Sample>)>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SeriesResult {
-    pub labels: LabelSet,
-    pub samples: Vec<Sample>,
-}
-
-pub fn router(db: Arc<dyn Database>) -> Router {
+pub fn router(db: Arc<Db>) -> Router {
     Router::new()
         .route("/api/v1/write_json", post(write_json))
         .route("/api/v1/read", get(read))
@@ -48,7 +33,7 @@ struct SampleDto {
 }
 
 async fn write_json(
-    State(db): State<Arc<dyn Database>>,
+    State(db): State<Arc<Db>>,
     Json(body): Json<Vec<WriteSeries>>,
 ) -> impl IntoResponse {
     let batch = WriteBatch {
@@ -74,7 +59,7 @@ async fn write_json(
 }
 
 async fn read(
-    State(db): State<Arc<dyn Database>>,
+    State(db): State<Arc<Db>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let mut start = 0u64;

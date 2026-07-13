@@ -788,47 +788,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "tsdb-api"
-version = "0.1.0"
-dependencies = [
- "axum",
- "serde",
- "serde_json",
- "tsdb-core",
-]
-
-[[package]]
-name = "tsdb-core"
-version = "0.1.0"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
-name = "tsdb-engine"
-version = "0.1.0"
-dependencies = [
- "tsdb-core",
-]
-
-[[package]]
-name = "tsdb-query"
-version = "0.1.0"
-
-[[package]]
-name = "tsdb-server"
+name = "tsdb"
 version = "0.1.0"
 dependencies = [
  "axum",
  "clap",
+ "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tower",
  "tracing",
  "tracing-subscriber",
- "tsdb-api",
- "tsdb-core",
- "tsdb-engine",
 ]
 
 [[package]]

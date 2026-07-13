@@ -1,13 +1,12 @@
+//! Storage interfaces and in-memory implementations.
+
 use thiserror::Error;
 
-#[derive(Error, Debug)]
-pub enum DbError {
-    #[error(transparent)]
-    Storage(#[from] StorageError),
+pub mod index;
+pub mod mem_table;
 
-    #[error("Invalid write batch: {0}")]
-    InvalidWriteBatch(String),
-}
+pub use index::Index;
+pub use mem_table::MemTable;
 
 #[derive(Error, Debug)]
 pub enum StorageError {
