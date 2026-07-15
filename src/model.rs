@@ -76,7 +76,7 @@ impl Sample {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
 pub struct SeriesId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
