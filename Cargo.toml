@@ -15,12 +15,16 @@ thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-
+bytes = "1.12.1"
+crc32c = "0.6.8"
+byteorder = "1.5.0"
+strum_macros = "0.28.0"
+tempfile = "3.27.0"
 [dev-dependencies]
 tower = { version = "0.5.2", features = ["util"] }
 
 [lints.clippy]
-all = {level = "deny", priority = -1}
+all = { level = "deny", priority = -1 }
 
 [profile.release]
 lto = "fat"

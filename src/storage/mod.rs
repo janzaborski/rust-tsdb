@@ -4,9 +4,11 @@ use thiserror::Error;
 
 pub mod index;
 pub mod mem_table;
+pub mod wal;
 
 pub use index::Index;
 pub use mem_table::MemTable;
+pub use wal::{Wal, WalConfig, WalError, WalRecord};
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -15,4 +17,7 @@ pub enum StorageError {
 
     #[error("Failed to read samples: {0}")]
     ReadSamples(String),
+
+    #[error("Corrupt index: {0}")]
+    CorruptIndex(String),
 }

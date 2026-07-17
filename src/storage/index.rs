@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use super::StorageError;
 use crate::model::{LabelSet, Matcher, MatcherOperator, SeriesId};
 
 #[derive(Default)]
@@ -47,9 +48,9 @@ impl Index {
 }
 
 impl Index {
-    pub fn encode(&mut self, labels: &LabelSet) -> SeriesId {
+    pub fn encode(&mut self, labels: &LabelSet) -> (SeriesId, bool) {
         if let Some(&id) = self.inverted.get(labels) {
-            return id;
+            return (id, false);
         }
 
         let id = self.next_id;
@@ -59,16 +60,16 @@ impl Index {
         self.forward.insert(id, labels.clone());
         self.all_ids.push(id);
 
-        for (name, value) in labels {
+        for label in labels {
             self.posting_index
-                .entry(name.clone())
+                .entry(label.name.clone())
                 .or_default()
-                .entry(value.clone())
+                .entry(label.value.clone())
                 .or_default()
                 .push(id);
         }
 
-        id
+        (id, true)
     }
 
     /// On empty matchers returns all series ids.
@@ -100,6 +101,69 @@ impl Index {
             .get(label_name)
             .map(union_all)
             .unwrap_or_default()
+    }
+
+    pub fn seeded(
+        series: impl IntoIterator<Item = (SeriesId, LabelSet)>,
+    ) -> Result<Self, StorageError> {
+        let mut index = Self::new();
+
+        for (id, labels) in series {
+            index.insert_seeded(id, labels)?;
+        }
+
+        index.all_ids.sort_unstable_by_key(|id| id.0);
+
+        for values in index.posting_index.values_mut() {
+            for ids in values.values_mut() {
+                ids.sort_unstable_by_key(|id| id.0);
+            }
+        }
+
+        index.next_id = index
+            .all_ids
+            .last()
+            .map(|id| SeriesId(id.0 + 1))
+            .unwrap_or_default();
+
+        Ok(index)
+    }
+
+    fn insert_seeded(&mut self, id: SeriesId, labels: LabelSet) -> Result<(), StorageError> {
+        if let Some(existing_labels) = self.forward.get(&id) {
+            if existing_labels != &labels {
+                return Err(StorageError::CorruptIndex(format!(
+                    "series id {id:?} has conflicting label sets"
+                )));
+            }
+
+            return Ok(());
+        }
+
+        if let Some(existing_id) = self.inverted.get(&labels) {
+            if *existing_id != id {
+                return Err(StorageError::CorruptIndex(format!(
+                    "label set is assigned to both {existing_id:?} and {id:?}"
+                )));
+            }
+
+            return Ok(());
+        }
+
+        self.forward.insert(id, labels.clone());
+        self.inverted.insert(labels.clone(), id);
+        self.all_ids.push(id);
+
+        for label in &labels {
+            self.posting_index
+                .entry(label.name.clone())
+                .or_default()
+                .entry(label.value.clone())
+                .or_default()
+                .push(id);
+        }
+
+        Ok(())
     }
 }
 
@@ -193,7 +257,7 @@ mod tests {
         let mut index = Index::new();
         let ls = label_set(&[("__name__", "cpu"), ("host", "a")]);
 
-        let id = index.encode(&ls);
+        let (id, _) = index.encode(&ls);
 
         assert_eq!(index.inverted.len(), 1);
         assert_eq!(index.inverted.get(&ls), Some(&id));
@@ -204,8 +268,8 @@ mod tests {
         let mut index = Index::new();
         let ls = label_set(&[("__name__", "cpu"), ("host", "a")]);
 
-        let id1 = index.encode(&ls);
-        let id2 = index.encode(&ls);
+        let (id1, _) = index.encode(&ls);
+        let (id2, _) = index.encode(&ls);
 
         assert_eq!(id1, id2);
         assert_eq!(index.inverted.len(), 1);
@@ -223,8 +287,8 @@ mod tests {
         ls_b.insert_label(Label::new("host", "a"));
         ls_b.insert_label(Label::new("__name__", "cpu"));
 
-        let id_a = index.encode(&ls_a);
-        let id_b = index.encode(&ls_b);
+        let (id_a, _) = index.encode(&ls_a);
+        let (id_b, _) = index.encode(&ls_b);
 
         assert_eq!(id_a, id_b);
         assert_eq!(index.inverted.len(), 1);
@@ -249,8 +313,8 @@ mod tests {
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("host", "b")]);
 
-        let id_a = index.encode(&ls_a);
-        let id_b = index.encode(&ls_b);
+        let (id_a, _) = index.encode(&ls_a);
+        let (id_b, _) = index.encode(&ls_b);
 
         assert_eq!(id_b.0, id_a.0 + 1);
     }
@@ -260,8 +324,8 @@ mod tests {
         let mut index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("host", "a")]);
-        let id_a = index.encode(&ls_a);
-        let id_b = index.encode(&ls_b); // duplicate labels -> same id, no new entries
+        let (id_a, _) = index.encode(&ls_a);
+        let (id_b, _) = index.encode(&ls_b); // duplicate labels -> same id, no new entries
 
         assert_eq!(id_a, id_b);
         assert_eq!(index.all_ids, vec![id_a]);
@@ -276,7 +340,7 @@ mod tests {
         let mut index = Index::new();
         let ls_a = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let ls_b = label_set(&[("__name__", "mem"), ("host", "a")]);
-        let id_a = index.encode(&ls_a);
+        let (id_a, _) = index.encode(&ls_a);
         index.encode(&ls_b);
 
         let result = index.resolve(&[Matcher::new("__name__", "cpu", MatcherOperator::Equal)]);
@@ -289,7 +353,7 @@ mod tests {
         let mut index = Index::new();
         let ls_a = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let ls_b = label_set(&[("__name__", "cpu"), ("host", "b")]);
-        let id_a = index.encode(&ls_a);
+        let (id_a, _) = index.encode(&ls_a);
         index.encode(&ls_b);
 
         let result = index.resolve(&[
@@ -316,8 +380,8 @@ mod tests {
         let mut index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("host", "b")]);
-        let id_a = index.encode(&ls_a);
-        let id_b = index.encode(&ls_b);
+        let (id_a, _) = index.encode(&ls_a);
+        let (id_b, _) = index.encode(&ls_b);
 
         let mut result = index.resolve(&[Matcher::new("host", "a", MatcherOperator::NotEqual)]);
         result.sort_by_key(|id| id.0);
@@ -331,8 +395,8 @@ mod tests {
         let mut index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("__name__", "cpu")]); // no "host" label at all
-        let id_a = index.encode(&ls_a);
-        let id_b = index.encode(&ls_b);
+        let (id_a, _) = index.encode(&ls_a);
+        let (id_b, _) = index.encode(&ls_b);
 
         let mut result = index.resolve(&[not_equal("host", "a")]);
         result.sort_by_key(|id| id.0);
@@ -346,7 +410,7 @@ mod tests {
         let mut index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("__name__", "cpu")]); // no "host" label -> treated as ""
-        let id_a = index.encode(&ls_a);
+        let (id_a, _) = index.encode(&ls_a);
         index.encode(&ls_b);
 
         let result = index.resolve(&[not_equal("host", "")]);
@@ -359,8 +423,8 @@ mod tests {
         let mut index = Index::new();
         let ls_a = label_set(&[("__name__", "cpu")]);
         let ls_b = label_set(&[("__name__", "mem")]);
-        let id_a = index.encode(&ls_a);
-        let id_b = index.encode(&ls_b);
+        let (id_a, _) = index.encode(&ls_a);
+        let (id_b, _) = index.encode(&ls_b);
 
         let result = index.resolve(&[]);
 
@@ -373,7 +437,7 @@ mod tests {
     fn labels_for_returns_labels_for_known_id() {
         let mut index = Index::new();
         let ls = label_set(&[("__name__", "cpu"), ("host", "a")]);
-        let id = index.encode(&ls);
+        let (id, _) = index.encode(&ls);
 
         assert_eq!(index.labels_for(id), Some(ls));
     }
@@ -389,8 +453,8 @@ mod tests {
         let mut index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("host", "b")]);
-        let id_a = index.encode(&ls_a);
-        let id_b = index.encode(&ls_b);
+        let (id_a, _) = index.encode(&ls_a);
+        let (id_b, _) = index.encode(&ls_b);
 
         let mut result = index.including_label("host");
         result.sort_by_key(|id| id.0);
@@ -410,7 +474,7 @@ mod tests {
     #[test]
     fn resolve_equal_and_not_equal_combined() {
         let mut index = Index::new();
-        let cpu_a = index.encode(&label_set(&[("__name__", "cpu"), ("host", "a")]));
+        let (cpu_a, _) = index.encode(&label_set(&[("__name__", "cpu"), ("host", "a")]));
         index.encode(&label_set(&[("__name__", "cpu"), ("host", "b")]));
         index.encode(&label_set(&[("__name__", "mem"), ("host", "a")]));
 
@@ -434,7 +498,7 @@ mod tests {
         let mut index = Index::new();
         index.encode(&label_set(&[("host", "a")]));
         index.encode(&label_set(&[("host", "b")]));
-        let c = index.encode(&label_set(&[("host", "c")]));
+        let (c, _) = index.encode(&label_set(&[("host", "c")]));
 
         // host!=a AND host!=b -> c
         let result = index.resolve(&[not_equal("host", "a"), not_equal("host", "b")]);
@@ -487,7 +551,7 @@ mod tests {
     #[test]
     fn encode_empty_label_set_creates_label_less_series() {
         let mut index = Index::new();
-        let id = index.encode(&LabelSet::new());
+        let (id, _) = index.encode(&LabelSet::new());
 
         // In the universe, no posting entries, reachable only via an empty query.
         assert_eq!(index.resolve(&[]), vec![id]);
@@ -498,9 +562,9 @@ mod tests {
     #[test]
     fn resolve_not_equal_returns_already_sorted_result() {
         let mut index = Index::new();
-        let a = index.encode(&label_set(&[("host", "a")]));
+        let (a, _) = index.encode(&label_set(&[("host", "a")]));
         index.encode(&label_set(&[("host", "b")]));
-        let c = index.encode(&label_set(&[("host", "c")]));
+        let (c, _) = index.encode(&label_set(&[("host", "c")]));
 
         // host!=b -> [a, c]. Asserted WITHOUT pre-sorting: resolve must already
         // return ascending order, which the set algebra downstream relies on.

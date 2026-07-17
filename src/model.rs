@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Label {
     pub name: String,
@@ -16,7 +14,7 @@ impl Label {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct LabelSet(BTreeMap<String, String>);
+pub struct LabelSet(Vec<Label>);
 
 impl LabelSet {
     pub fn new() -> Self {
@@ -31,18 +29,29 @@ impl LabelSet {
         set
     }
 
-    /// Returns metric name if it exists (that is label named __name__)
     pub fn metric_name(&self) -> Option<&str> {
-        self.0.get("__name__").map(String::as_str)
+        self.get("__name__")
     }
 
-    /// Returns the value of the label with the given name, if it exists.   
     pub fn get(&self, name: &str) -> Option<&str> {
-        self.0.get(name).map(String::as_str)
+        self.0
+            .binary_search_by(|label| label.name.as_str().cmp(name))
+            .ok()
+            .map(|i| self.0[i].value.as_str())
     }
 
     pub fn insert_label(&mut self, label: Label) {
-        self.0.insert(label.name, label.value);
+        match self
+            .0
+            .binary_search_by(|existing| existing.name.cmp(&label.name))
+        {
+            Ok(i) => self.0[i].value = label.value,
+            Err(i) => self.0.insert(i, label),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -51,8 +60,8 @@ impl LabelSet {
 }
 
 impl<'a> IntoIterator for &'a LabelSet {
-    type Item = (&'a String, &'a String);
-    type IntoIter = std::collections::btree_map::Iter<'a, String, String>;
+    type Item = &'a Label;
+    type IntoIter = std::slice::Iter<'a, Label>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
@@ -181,7 +190,7 @@ mod tests {
             ("method", "get"),
         ]);
 
-        let names: Vec<&str> = set.into_iter().map(|(name, _)| name.as_str()).collect();
+        let names: Vec<&str> = set.into_iter().map(|l| l.name.as_str()).collect();
 
         assert_eq!(names, vec!["__name__", "method", "zone"]);
     }

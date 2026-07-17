@@ -86,7 +86,7 @@ fn to_matrix(results: Vec<SeriesResult>) -> Value {
         .map(|s| {
             let metric: serde_json::Map<String, Value> = (&s.labels)
                 .into_iter()
-                .map(|(n, v)| (n.clone(), Value::String(v.clone())))
+                .map(|l| (l.name.clone(), Value::String(l.value.clone())))
                 .collect();
             let values: Vec<Value> = s
                 .samples
