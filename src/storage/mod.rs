@@ -3,6 +3,7 @@
 use thiserror::Error;
 
 pub mod index;
+pub mod indexes;
 pub mod mem_table;
 
 pub use index::Index;

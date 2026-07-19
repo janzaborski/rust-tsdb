@@ -1,15 +1,21 @@
-use std::borrow::Cow;
+use arc_swap::ArcSwap;
+use dashmap::DashMap;
 use std::collections::HashMap;
+use std::ops::Deref;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 use crate::model::{LabelSet, Matcher, MatcherOperator, SeriesId};
 
-#[derive(Default)]
+type PosintgIndex = HashMap<String, HashMap<String, ArcSwap<Vec<SeriesId>>>>;
+
+#[derive(Default, Debug)]
 pub struct Index {
-    inverted: HashMap<LabelSet, SeriesId>,
-    forward: HashMap<SeriesId, LabelSet>,
-    posting_index: HashMap<String, HashMap<String, Vec<SeriesId>>>,
-    all_ids: Vec<SeriesId>,
-    next_id: SeriesId,
+    forward: DashMap<SeriesId, LabelSet>,
+    inverted: DashMap<LabelSet, SeriesId>,
+    posting_index: RwLock<PosintgIndex>,
+    next_id: AtomicU64,
+    all_ids: ArcSwap<Vec<SeriesId>>,
 }
 
 impl Index {
@@ -17,88 +23,183 @@ impl Index {
         Self::default()
     }
 
-    fn candidates(&self, matcher: &Matcher) -> Cow<'_, [SeriesId]> {
+    pub fn encode(&self, labels: &LabelSet) -> SeriesId {
+        if let Some(id) = self.inverted.get(labels) {
+            return *id;
+        }
+
+        match self.inverted.entry(labels.clone()) {
+            dashmap::Entry::Occupied(entry) => *entry.get(),
+            dashmap::Entry::Vacant(entry) => {
+                let id = SeriesId(self.next_id.fetch_add(1, Ordering::AcqRel));
+                entry.insert(id);
+                self.forward.insert(id, labels.clone());
+
+                let mut posting_writer = self.posting_index.write().unwrap();
+                for (name, value) in labels.into_iter() {
+                    let label_map = posting_writer.entry(name.clone()).or_default();
+                    let arc_vec = label_map.entry(value.clone()).or_default();
+
+                    arc_vec.rcu(|old_vec| {
+                        let pos = old_vec.binary_search(&id).unwrap_or_else(|p| p);
+                        let mut new_vec = Vec::with_capacity(old_vec.len() + 1);
+                        new_vec.extend_from_slice(&old_vec[..pos]);
+                        new_vec.push(id);
+                        new_vec.extend_from_slice(&old_vec[pos..]);
+
+                        new_vec
+                    });
+                }
+
+                self.all_ids.rcu(|old_vec| {
+                    let pos = old_vec.binary_search(&id).unwrap_or_else(|p| p);
+                    let mut new_vec = Vec::with_capacity(old_vec.len() + 1);
+                    new_vec.extend_from_slice(&old_vec[..pos]);
+                    new_vec.push(id);
+                    new_vec.extend_from_slice(&old_vec[pos..]);
+
+                    new_vec
+                });
+
+                id
+            }
+        }
+    }
+
+    pub fn encode_batch(&self, labelsets: Vec<LabelSet>) -> (Vec<SeriesId>, Vec<usize>) {
+        let mut ids = vec![SeriesId::default(); labelsets.len()];
+        let mut created: Vec<usize> = Vec::new();
+        let mut unknown: Vec<usize> = Vec::new();
+
+        for (ind, ls) in labelsets.iter().enumerate() {
+            match self.inverted.get(ls) {
+                Some(id_ref) => {
+                    ids[ind] = *id_ref;
+                }
+                None => unknown.push(ind),
+            }
+        }
+
+        if unknown.is_empty() {
+            return (ids, created);
+        }
+
+        let mut groups: HashMap<(String, String), Vec<SeriesId>> = HashMap::new();
+        let mut fresh: Vec<SeriesId> = Vec::new();
+
+        let mut posting = self.posting_index.write().unwrap();
+        for unknown_ind in unknown {
+            let ls = &labelsets[unknown_ind];
+            let new_id = match self.inverted.entry(ls.clone()) {
+                dashmap::Entry::Occupied(e) => {
+                    ids[unknown_ind] = *e.get();
+                    continue;
+                }
+                dashmap::Entry::Vacant(e) => {
+                    let id = SeriesId(self.next_id.fetch_add(1, Ordering::AcqRel));
+                    e.insert(id);
+                    id
+                }
+            };
+            self.forward.insert(new_id, ls.clone());
+            ids[unknown_ind] = new_id;
+            created.push(unknown_ind);
+            fresh.push(new_id);
+            for (name, value) in ls {
+                groups
+                    .entry((name.clone(), value.clone()))
+                    .or_default()
+                    .push(new_id);
+            }
+        }
+
+        for ((name, value), group_ids) in groups {
+            let as_vec = posting.entry(name).or_default().entry(value).or_default();
+            as_vec.rcu(|old_vec| {
+                let mut new_vec: Vec<SeriesId> =
+                    Vec::with_capacity(old_vec.len() + group_ids.len());
+                new_vec.extend_from_slice(old_vec);
+                new_vec.extend_from_slice(&group_ids);
+
+                new_vec
+            });
+        }
+
+        if !fresh.is_empty() {
+            self.all_ids.rcu(|old_vec| {
+                let mut new_vec: Vec<SeriesId> = Vec::with_capacity(old_vec.len() + fresh.len());
+                new_vec.extend_from_slice(old_vec);
+                new_vec.extend_from_slice(&fresh);
+
+                new_vec
+            });
+        }
+
+        (ids, created)
+    }
+
+    fn candidates(&self, matcher: &Matcher) -> Arc<Vec<SeriesId>> {
         match matcher.operator {
-            MatcherOperator::Equal => self
-                .posting_index
-                .get(&matcher.name)
-                .and_then(|values| values.get(&matcher.value))
-                .map(|ids| Cow::Borrowed(ids.as_slice()))
-                .unwrap_or(Cow::Owned(Vec::new())),
-
+            MatcherOperator::Equal => {
+                let posintg_reader = self.posting_index.read().unwrap();
+                posintg_reader
+                    .get(&matcher.name)
+                    .and_then(|values| values.get(&matcher.value))
+                    .map(|ids_swap| ids_swap.load_full())
+                    .unwrap_or_default()
+            }
             MatcherOperator::NotEqual => {
-                let values = self.posting_index.get(&matcher.name);
-                let with_label: Vec<SeriesId> = values.map(union_all).unwrap_or_default();
-                let with_this_value: &[SeriesId] = values
+                let posting_reader = self.posting_index.read().unwrap();
+                let values = posting_reader.get(&matcher.name);
+                let with_label: Arc<Vec<SeriesId>> = values.map(union_all_swap).unwrap_or_default();
+                let with_this_value: Arc<Vec<SeriesId>> = values
                     .and_then(|v| v.get(&matcher.value))
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
-
-                let mut result = difference_sorted(&with_label, with_this_value);
+                    .map(|swap| swap.load_full())
+                    .unwrap_or_default();
+                let mut result = difference_sorted(&with_label, &with_this_value);
 
                 if !matcher.value.is_empty() {
-                    let without_label = difference_sorted(&self.all_ids, &with_label);
+                    let without_label = difference_sorted(&self.all_ids.load_full(), &with_label);
                     result = union_sorted(&result, &without_label);
                 }
-                Cow::Owned(result)
+
+                Arc::new(result)
             }
         }
     }
-}
 
-impl Index {
-    pub fn encode(&mut self, labels: &LabelSet) -> SeriesId {
-        if let Some(&id) = self.inverted.get(labels) {
-            return id;
-        }
-
-        let id = self.next_id;
-        self.next_id.0 += 1;
-
-        self.inverted.insert(labels.clone(), id);
-        self.forward.insert(id, labels.clone());
-        self.all_ids.push(id);
-
-        for (name, value) in labels {
-            self.posting_index
-                .entry(name.clone())
-                .or_default()
-                .entry(value.clone())
-                .or_default()
-                .push(id);
-        }
-
-        id
-    }
-
-    /// On empty matchers returns all series ids.
     pub fn resolve(&self, matchers: &[Matcher]) -> Vec<SeriesId> {
         if matchers.is_empty() {
-            return self.all_ids.clone();
+            return self.all_ids.load_full().deref().clone();
         }
 
-        let mut iter = matchers.iter();
-        let mut candidates: Cow<[SeriesId]> = self.candidates(iter.next().unwrap());
+        let mut matchers_iter = matchers.iter();
+        let m = matchers_iter.next().unwrap();
+        let mut ret = self.candidates(m).deref().clone();
 
-        for m in iter {
-            let this_set = self.candidates(m);
-            intersect_in_place(candidates.to_mut(), &this_set);
-            if candidates.is_empty() {
-                return Vec::new();
+        for m in matchers_iter {
+            let candidates = self.candidates(m);
+            intersect_in_place(&mut ret, &candidates);
+
+            if ret.is_empty() {
+                return vec![];
             }
         }
 
-        candidates.into_owned()
+        ret
     }
 
     pub fn labels_for(&self, id: SeriesId) -> Option<LabelSet> {
-        self.forward.get(&id).cloned()
+        self.forward.get(&id).map(|r| r.value().clone())
     }
 
     pub fn including_label(&self, label_name: &str) -> Vec<SeriesId> {
         self.posting_index
+            .read()
+            .unwrap()
             .get(label_name)
-            .map(union_all)
+            .map(union_all_swap)
+            .map(|a| a.deref().clone())
             .unwrap_or_default()
     }
 }
@@ -165,10 +266,12 @@ fn intersect_in_place(a: &mut Vec<SeriesId>, b: &[SeriesId]) {
     a.truncate(write);
 }
 
-fn union_all(values: &HashMap<String, Vec<SeriesId>>) -> Vec<SeriesId> {
-    values
+fn union_all_swap(values: &HashMap<String, ArcSwap<Vec<SeriesId>>>) -> Arc<Vec<SeriesId>> {
+    let merged = values
         .values()
-        .fold(Vec::new(), |acc, v| union_sorted(&acc, v))
+        .map(|swap| swap.load_full())
+        .fold(Vec::new(), |acc, v| union_sorted(&acc, &v));
+    Arc::new(merged)
 }
 
 #[cfg(test)]
@@ -190,18 +293,18 @@ mod tests {
 
     #[test]
     fn encode_assigns_new_id_for_new_labels() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls = label_set(&[("__name__", "cpu"), ("host", "a")]);
 
         let id = index.encode(&ls);
 
         assert_eq!(index.inverted.len(), 1);
-        assert_eq!(index.inverted.get(&ls), Some(&id));
+        assert_eq!(index.inverted.get(&ls).map(|r| *r), Some(id));
     }
 
     #[test]
     fn encode_returns_same_id_for_same_labels() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls = label_set(&[("__name__", "cpu"), ("host", "a")]);
 
         let id1 = index.encode(&ls);
@@ -213,7 +316,7 @@ mod tests {
 
     #[test]
     fn encode_treats_different_insertion_order_as_same_series() {
-        let mut index = Index::new();
+        let index = Index::new();
 
         let mut ls_a = LabelSet::new();
         ls_a.insert_label(Label::new("__name__", "cpu"));
@@ -232,7 +335,7 @@ mod tests {
 
     #[test]
     fn encode_assigns_different_ids_for_different_labels() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let ls_b = label_set(&[("__name__", "cpu"), ("host", "b")]);
 
@@ -245,7 +348,7 @@ mod tests {
 
     #[test]
     fn encode_increments_ids_sequentially() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("host", "b")]);
 
@@ -257,23 +360,23 @@ mod tests {
 
     #[test]
     fn encode_maintains_sorted_posting_lists_and_universe() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("host", "a")]);
         let id_a = index.encode(&ls_a);
         let id_b = index.encode(&ls_b); // duplicate labels -> same id, no new entries
 
         assert_eq!(id_a, id_b);
-        assert_eq!(index.all_ids, vec![id_a]);
-        assert_eq!(
-            index.posting_index.get("host").unwrap().get("a").unwrap(),
-            &vec![id_a]
-        );
+        assert_eq!(*index.all_ids.load_full(), vec![id_a]);
+
+        let posting = index.posting_index.read().unwrap();
+        let ids = posting.get("host").unwrap().get("a").unwrap().load_full();
+        assert_eq!(*ids, vec![id_a]);
     }
 
     #[test]
     fn resolve_equal_matches_single_matcher() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let ls_b = label_set(&[("__name__", "mem"), ("host", "a")]);
         let id_a = index.encode(&ls_a);
@@ -286,7 +389,7 @@ mod tests {
 
     #[test]
     fn resolve_equal_matches_multiple_matchers_as_and() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let ls_b = label_set(&[("__name__", "cpu"), ("host", "b")]);
         let id_a = index.encode(&ls_a);
@@ -302,7 +405,7 @@ mod tests {
 
     #[test]
     fn resolve_returns_empty_when_value_never_indexed() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls = label_set(&[("__name__", "cpu")]);
         index.encode(&ls);
 
@@ -313,7 +416,7 @@ mod tests {
 
     #[test]
     fn resolve_not_equal_matches_different_value() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("host", "b")]);
         let id_a = index.encode(&ls_a);
@@ -328,7 +431,7 @@ mod tests {
 
     #[test]
     fn resolve_not_equal_includes_series_missing_the_label() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("__name__", "cpu")]); // no "host" label at all
         let id_a = index.encode(&ls_a);
@@ -343,7 +446,7 @@ mod tests {
 
     #[test]
     fn resolve_not_equal_against_empty_string_excludes_missing_label() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("__name__", "cpu")]); // no "host" label -> treated as ""
         let id_a = index.encode(&ls_a);
@@ -356,7 +459,7 @@ mod tests {
 
     #[test]
     fn resolve_with_no_matchers_returns_all_series() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("__name__", "cpu")]);
         let ls_b = label_set(&[("__name__", "mem")]);
         let id_a = index.encode(&ls_a);
@@ -371,7 +474,7 @@ mod tests {
 
     #[test]
     fn labels_for_returns_labels_for_known_id() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let id = index.encode(&ls);
 
@@ -386,7 +489,7 @@ mod tests {
 
     #[test]
     fn including_label_returns_series_across_multiple_values() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls_a = label_set(&[("host", "a")]);
         let ls_b = label_set(&[("host", "b")]);
         let id_a = index.encode(&ls_a);
@@ -400,7 +503,7 @@ mod tests {
 
     #[test]
     fn including_label_returns_empty_when_no_series_have_label() {
-        let mut index = Index::new();
+        let index = Index::new();
         let ls = label_set(&[("__name__", "cpu")]);
         index.encode(&ls);
 
@@ -409,19 +512,19 @@ mod tests {
 
     #[test]
     fn resolve_equal_and_not_equal_combined() {
-        let mut index = Index::new();
+        let index = Index::new();
         let cpu_a = index.encode(&label_set(&[("__name__", "cpu"), ("host", "a")]));
         index.encode(&label_set(&[("__name__", "cpu"), ("host", "b")]));
         index.encode(&label_set(&[("__name__", "mem"), ("host", "a")]));
 
-        // __name__=cpu AND host!=b -> cpu_a only. Equal first (borrowed Cow).
+        // __name__=cpu AND host!=b -> cpu_a only. Equal evaluated first.
         let result = index.resolve(&[
             Matcher::new("__name__", "cpu", MatcherOperator::Equal),
             not_equal("host", "b"),
         ]);
         assert_eq!(result, vec![cpu_a]);
 
-        // Same query, matchers reversed -> NotEqual first (owned Cow). Same result.
+        // Same query, matchers reversed -> NotEqual first. Same result.
         let result = index.resolve(&[
             not_equal("host", "b"),
             Matcher::new("__name__", "cpu", MatcherOperator::Equal),
@@ -431,7 +534,7 @@ mod tests {
 
     #[test]
     fn resolve_not_equal_and_not_equal_combined() {
-        let mut index = Index::new();
+        let index = Index::new();
         index.encode(&label_set(&[("host", "a")]));
         index.encode(&label_set(&[("host", "b")]));
         let c = index.encode(&label_set(&[("host", "c")]));
@@ -444,7 +547,7 @@ mod tests {
 
     #[test]
     fn resolve_returns_empty_when_matchers_have_no_overlap() {
-        let mut index = Index::new();
+        let index = Index::new();
         index.encode(&label_set(&[("__name__", "cpu"), ("host", "a")]));
 
         // First matcher matches, second matches nothing -> intersection empties.
@@ -458,7 +561,7 @@ mod tests {
 
     #[test]
     fn resolve_two_equal_matchers_on_same_label_is_empty() {
-        let mut index = Index::new();
+        let index = Index::new();
         index.encode(&label_set(&[("host", "a")]));
         index.encode(&label_set(&[("host", "b")]));
 
@@ -486,18 +589,18 @@ mod tests {
 
     #[test]
     fn encode_empty_label_set_creates_label_less_series() {
-        let mut index = Index::new();
+        let index = Index::new();
         let id = index.encode(&LabelSet::new());
 
         // In the universe, no posting entries, reachable only via an empty query.
         assert_eq!(index.resolve(&[]), vec![id]);
         assert_eq!(index.labels_for(id), Some(LabelSet::new()));
-        assert!(index.posting_index.is_empty());
+        assert!(index.posting_index.read().unwrap().is_empty());
     }
 
     #[test]
     fn resolve_not_equal_returns_already_sorted_result() {
-        let mut index = Index::new();
+        let index = Index::new();
         let a = index.encode(&label_set(&[("host", "a")]));
         index.encode(&label_set(&[("host", "b")]));
         let c = index.encode(&label_set(&[("host", "c")]));
