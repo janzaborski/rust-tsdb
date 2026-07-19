@@ -20,6 +20,7 @@ arc-swap = "1.9.2"
 
 [dev-dependencies]
 tower = { version = "0.5.2", features = ["util"] }
+rand = { version = "0.9", features = ["small_rng"] }
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

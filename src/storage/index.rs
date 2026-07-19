@@ -65,6 +65,79 @@ impl Index {
             }
         }
     }
+
+    pub fn encode_batch(&self, labelsets: Vec<LabelSet>) -> (Vec<SeriesId>, Vec<usize>) {
+        let mut ids = vec![SeriesId::default(); labelsets.len()];
+        let mut created: Vec<usize> = Vec::new();
+        let mut unknown: Vec<usize> = Vec::new();
+
+        for (ind, ls) in labelsets.iter().enumerate() {
+            match self.inverted.get(ls) {
+                Some(id_ref) => {
+                    ids[ind] = *id_ref;
+                }
+                None => unknown.push(ind),
+            }
+        }
+
+        if unknown.is_empty() {
+            return (ids, created);
+        }
+
+        let mut groups: HashMap<(String, String), Vec<SeriesId>> = HashMap::new();
+        let mut fresh: Vec<SeriesId> = Vec::new();
+
+        let mut posting = self.posting_index.write().unwrap();
+        for unknown_ind in unknown {
+            let ls = &labelsets[unknown_ind];
+            let new_id = match self.inverted.entry(ls.clone()) {
+                dashmap::Entry::Occupied(e) => {
+                    ids[unknown_ind] = *e.get();
+                    continue;
+                }
+                dashmap::Entry::Vacant(e) => {
+                    let id = SeriesId(self.next_id.fetch_add(1, Ordering::AcqRel));
+                    e.insert(id);
+                    id
+                }
+            };
+            self.forward.insert(new_id, ls.clone());
+            ids[unknown_ind] = new_id;
+            created.push(unknown_ind);
+            fresh.push(new_id);
+            for (name, value) in ls {
+                groups
+                    .entry((name.clone(), value.clone()))
+                    .or_default()
+                    .push(new_id);
+            }
+        }
+
+        for ((name, value), group_ids) in groups {
+            let as_vec = posting.entry(name).or_default().entry(value).or_default();
+            as_vec.rcu(|old_vec| {
+                let mut new_vec: Vec<SeriesId> =
+                    Vec::with_capacity(old_vec.len() + group_ids.len());
+                new_vec.extend_from_slice(old_vec);
+                new_vec.extend_from_slice(&group_ids);
+
+                new_vec
+            });
+        }
+
+        if !fresh.is_empty() {
+            self.all_ids.rcu(|old_vec| {
+                let mut new_vec: Vec<SeriesId> = Vec::with_capacity(old_vec.len() + fresh.len());
+                new_vec.extend_from_slice(old_vec);
+                new_vec.extend_from_slice(&fresh);
+
+                new_vec
+            });
+        }
+
+        (ids, created)
+    }
+
     fn candidates(&self, matcher: &Matcher) -> Arc<Vec<SeriesId>> {
         match matcher.operator {
             MatcherOperator::Equal => {
