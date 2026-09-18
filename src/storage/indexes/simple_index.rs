@@ -71,6 +71,10 @@ impl SimpleIndex {
         id
     }
 
+    pub fn lookup(&self, labels: &LabelSet) -> Option<SeriesId> {
+        self.inverted.get(labels).copied()
+    }
+
     pub fn encode_batch(&mut self, labelsets: &[LabelSet]) -> (Vec<SeriesId>, Vec<usize>) {
         let mut ids = Vec::with_capacity(labelsets.len());
         let mut created = Vec::new();
@@ -182,7 +186,10 @@ fn intersect_in_place(a: &mut Vec<SeriesId>, b: &[SeriesId]) {
 }
 
 fn union_all(values: &HashMap<String, Vec<SeriesId>>) -> Vec<SeriesId> {
-    values
-        .values()
-        .fold(Vec::new(), |acc, v| union_sorted(&acc, v))
+    let capacity = values.values().map(Vec::len).sum();
+    let mut result = Vec::with_capacity(capacity);
+    result.extend(values.values().flatten().copied());
+    result.sort_unstable();
+    result.dedup();
+    result
 }

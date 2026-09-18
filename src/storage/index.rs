@@ -66,6 +66,10 @@ impl Index {
         }
     }
 
+    pub fn lookup(&self, labels: &LabelSet) -> Option<SeriesId> {
+        self.inverted.get(labels).map(|id| *id)
+    }
+
     pub fn encode_batch(&self, labelsets: Vec<LabelSet>) -> (Vec<SeriesId>, Vec<usize>) {
         let mut ids = vec![SeriesId::default(); labelsets.len()];
         let mut created: Vec<usize> = Vec::new();
