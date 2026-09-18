@@ -1,7 +1,8 @@
 use std::sync::RwLock;
 
 use crate::model::{LabelSet, Matcher, Sample, TimeRange};
-use crate::storage::{Index, MemTable, StorageError};
+use crate::storage::indexes::simple_index::SimpleIndex;
+use crate::storage::{MemTable, StorageError};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,14 +27,14 @@ pub enum DbError {
 
 pub struct Db {
     store: RwLock<MemTable>,
-    index: RwLock<Index>,
+    index: RwLock<SimpleIndex>,
 }
 
 impl Db {
     pub fn new() -> Self {
         Self {
             store: RwLock::new(MemTable::new()),
-            index: RwLock::new(Index::new()),
+            index: RwLock::new(SimpleIndex::new()),
         }
     }
 
