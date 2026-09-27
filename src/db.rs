@@ -22,6 +22,9 @@ pub enum DbError {
 
     #[error("Invalid write batch: {0}")]
     InvalidWriteBatch(String),
+
+    #[error("Invalid time range: start ({start}) must not exceed end ({end})")]
+    InvalidTimeRange { start: u64, end: u64 },
 }
 
 #[derive(Default)]
@@ -40,8 +43,6 @@ impl Db {
         Self::default()
     }
 
-    /// Appends a batch while holding one write lock over the index and samples.
-    /// Series with no samples are ignored and do not create index entries.
     pub fn write(&self, batch: WriteBatch) -> Result<(), DbError> {
         let mut state = self.state.write().unwrap();
         for (labels, samples) in batch.series {
@@ -61,6 +62,12 @@ impl Db {
         matchers: &[Matcher],
         range: TimeRange,
     ) -> Result<Vec<SeriesResult>, DbError> {
+        if range.start > range.end {
+            return Err(DbError::InvalidTimeRange {
+                start: range.start,
+                end: range.end,
+            });
+        }
         let state = self.state.read().unwrap();
 
         let mut out = Vec::new();
@@ -125,6 +132,35 @@ mod tests {
                 labels: labels("cpu"),
                 samples,
             }]
+        );
+    }
+
+    #[test]
+    fn query_rejects_reversed_ranges_even_without_matching_series() {
+        let db = Db::new();
+        let range = TimeRange::new(200, 100);
+        assert!(matches!(
+            db.query(&[], range),
+            Err(DbError::InvalidTimeRange {
+                start: 200,
+                end: 100
+            })
+        ));
+
+        db.write(WriteBatch {
+            series: vec![(labels("cpu"), vec![Sample::new(100, 1.0)])],
+        })
+        .unwrap();
+        assert!(matches!(
+            db.query(&[], range),
+            Err(DbError::InvalidTimeRange {
+                start: 200,
+                end: 100
+            })
+        ));
+        assert_eq!(
+            db.query(&[], TimeRange::new(100, 100)).unwrap()[0].samples,
+            vec![Sample::new(100, 1.0)]
         );
     }
 

@@ -14,8 +14,16 @@ impl MemTable {
 }
 
 impl MemTable {
+    /// Discards samples whose timestamps are not strictly newer for this series.
     pub fn append(&mut self, id: SeriesId, sample: Sample) -> Result<(), StorageError> {
-        self.data.entry(id).or_default().push(sample);
+        let series = self.data.entry(id).or_default();
+        if series
+            .last()
+            .is_some_and(|last| sample.timestamp <= last.timestamp)
+        {
+            return Ok(());
+        }
+        series.push(sample);
         Ok(())
     }
 
@@ -71,6 +79,39 @@ mod tests {
 
         assert_eq!(store.data.get(&id_a).unwrap().len(), 1);
         assert_eq!(store.data.get(&id_b).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn append_keeps_only_strictly_increasing_timestamps_per_series() {
+        let mut store = MemTable::new();
+        let id = SeriesId(1);
+        for sample in [
+            Sample::new(0, 0.0),
+            Sample::new(0, 9.0),
+            Sample::new(200, 2.0),
+            Sample::new(100, 1.0),
+            Sample::new(200, 9.0),
+            Sample::new(u64::MAX, 3.0),
+            Sample::new(u64::MAX, 9.0),
+        ] {
+            store.append(id, sample).unwrap();
+        }
+        store.append(SeriesId(2), Sample::new(0, 1.0)).unwrap();
+
+        assert_eq!(
+            store.read(id, TimeRange::new(0, u64::MAX)).unwrap(),
+            vec![
+                Sample::new(0, 0.0),
+                Sample::new(200, 2.0),
+                Sample::new(u64::MAX, 3.0)
+            ]
+        );
+        assert_eq!(
+            store
+                .read(SeriesId(2), TimeRange::new(0, u64::MAX))
+                .unwrap(),
+            vec![Sample::new(0, 1.0)]
+        );
     }
 
     #[test]
