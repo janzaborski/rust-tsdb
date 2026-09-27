@@ -57,3 +57,47 @@ async fn write_then_read_roundtrips() {
     assert_eq!(values[0], json!([1719000000.0, "0.5"]));
     assert_eq!(values[1], json!([1719000001.0, "1.5"]));
 }
+
+#[tokio::test]
+async fn empty_series_writes_do_not_break_reads_or_change_existing_samples() {
+    let app = router(Arc::new(Db::new()));
+
+    for body in [
+        json!([
+            {"labels": {"__name__": "empty"}, "samples": []},
+            {"labels": {"__name__": "cpu"}, "samples": [{"t": 100, "v": 1.0}]}
+        ]),
+        json!([{ "labels": {"__name__": "cpu"}, "samples": [] }]),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/write_json")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    let response = app
+        .oneshot(Request::get("/api/v1/read").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        body,
+        json!({
+            "status": "success",
+            "data": {
+                "resultType": "matrix",
+                "result": [{"metric": {"__name__": "cpu"}, "values": [[0.1, "1"]]}]
+            }
+        })
+    );
+}
