@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::db::{Db, SeriesResult, WriteBatch};
+use crate::db::{Db, DbError, SeriesResult, WriteBatch};
 use crate::model::{Label, LabelSet, Matcher, MatcherOperator, Sample, TimeRange};
 use axum::{
     Json, Router,
@@ -61,23 +61,43 @@ async fn write_json(
 async fn read(
     State(db): State<Arc<Db>>,
     Query(params): Query<HashMap<String, String>>,
-) -> impl IntoResponse {
+) -> Result<Json<Value>, (StatusCode, String)> {
     let mut start = 0u64;
     let mut end = u64::MAX;
     let mut matchers = Vec::new();
     for (k, v) in params {
         match k.as_str() {
-            "start" => start = v.parse().unwrap_or(0),
-            "end" => end = v.parse().unwrap_or(u64::MAX),
+            "start" => {
+                start = v.parse().map_err(|_| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        "start must be an unsigned integer in milliseconds".to_owned(),
+                    )
+                })?;
+            }
+            "end" => {
+                end = v.parse().map_err(|_| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        "end must be an unsigned integer in milliseconds".to_owned(),
+                    )
+                })?;
+            }
             "name" => matchers.push(Matcher::new("__name__", v, MatcherOperator::Equal)),
             _ => matchers.push(Matcher::new(k, v, MatcherOperator::Equal)),
         }
     }
 
-    match db.query(&matchers, TimeRange::new(start, end)) {
-        Ok(results) => Json(to_matrix(results)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    let results = db
+        .query(&matchers, TimeRange::new(start, end))
+        .map_err(|e| {
+            let status = match e {
+                DbError::InvalidTimeRange { .. } => StatusCode::BAD_REQUEST,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, e.to_string())
+        })?;
+    Ok(Json(to_matrix(results)))
 }
 
 fn to_matrix(results: Vec<SeriesResult>) -> Value {
