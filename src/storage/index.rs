@@ -95,6 +95,10 @@ impl Index {
         self.forward.get(&id).cloned()
     }
 
+    pub fn id_for(&self, labels: &LabelSet) -> Option<SeriesId> {
+        self.inverted.get(labels).copied()
+    }
+
     pub fn including_label(&self, label_name: &str) -> Vec<SeriesId> {
         self.posting_index
             .get(label_name)
