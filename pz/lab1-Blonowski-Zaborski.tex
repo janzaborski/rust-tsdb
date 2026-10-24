@@ -1,0 +1,379 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[polish]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{array,longtable,pdflscape}
+\usepackage{url}
+
+\renewcommand{\arraystretch}{1.2}
+
+\begin{document}
+\raggedbottom
+
+\section*{Etap 1: Specyfikacja wymagań i zakres pracy}
+
+\section{Metadane i historia zmian}
+
+\begin{itemize}
+    \item \textbf{Tytuł pracy:} Implementacja bazy danych szeregów czasowych w języku Rust
+    \item \textbf{Autorzy:} Hubert Błonowski, Jan Zaborski
+    \item \textbf{Promotor:} mgr inż. Paweł Sobótka
+    \item \textbf{Repozytorium Git:} \url{https://github.com/janzaborski/rust-tsdb}
+\end{itemize}
+
+
+\begingroup
+\small
+\begin{longtable}{>{\raggedright\arraybackslash}p{\dimexpr 0.12\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.17\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.28\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.43\linewidth-2\tabcolsep\relax}}
+    \hline
+    \textbf{Wersja} & \textbf{Data} & \textbf{Autor}                          & \textbf{Opis zmiany}                   \\
+    \hline
+    \endfirsthead
+    \textbf{Wersja} & \textbf{Data} & \textbf{Autor}                          & \textbf{Opis zmiany}                   \\
+    \hline
+    \endhead
+    1.0             & 18.10.2026    & Hubert Błonowski                        & Pierwsza wersja dokumentu              \\
+    \hline
+    1.1             & 21.10.2026    & Hubert Błonowski, \newline Jan Zaborski & Zaadresowanie uwag promotora. \newline
+    Zaktualizowano słownik, \newline
+    FR-04: doprecyzowano wymagania dotyczące zapytań.  \newline
+    FR-07: recovery - usunięto; pokrywa się z NFR-04. \newline
+    FR-08: uwzględniono buforowanie w pamięci. \newline
+    FR-09: dodano obsługę punktów out-of-order. \newline
+    NFR-01: doprecyzowano wymagania dotyczące opóźnienia. \newline
+    NFR-03: doprecyzowano wymagania dotyczące zużycia zasobów. \newline
+    Zmiany: NFR-1, NFR-3, FR-04. Nowe: FR-08, FR-09. Usunięto: FR-07                                                   \\
+    \hline
+\end{longtable}
+\endgroup
+
+\section{Cel pracy i problem inżynierski}
+
+Celem pracy jest zaprojektowanie, implementacja i ocena jednowęzłowej bazy danych szeregów czasowych napisanej w języku Rust, zapewniającej trwałe przechowywanie pomiarów, wykonywanie zapytań oraz interfejs użytkownika.
+
+\section{Zakres pracy}
+
+\subsection{Zakres obowiązkowy}
+
+\begin{enumerate}
+    \item \textbf{Własny silnik przechowywania:} zapis i odczyt wartości, organizacja danych na dysku, indeksowanie, odzyskiwanie po awarii procesu, przyjmowanie punktów out-of-order.
+    \item \textbf{Serwer HTTP:} przyjmowanie pomiarów (passive ingestion) oraz udostępnianie zapisanych danych i wyników zapytań.
+    \item \textbf{Model danych:} szeregi identyfikowane przez nazwę metryki i zestaw etykiet, zawierające punkty z czasem i pojedynczą wartością liczbową f64.
+    \item \textbf{Minimalny podzbiór PromQL:} wybór metryki, dokładne dopasowanie etykiet oraz podstawowe funkcje agregujące próbki w czasie.
+    \item \textbf{Integracja z Grafaną:} odczyt z bazy przez standardowe źródło Prometheus, w zakresie potrzebnym do przygotowanego dashboardu.
+    \item \textbf{Demonstracja:} przykładowe serwisy wysyłające telemetrię, baza danych i dashboard uruchamiane przez Docker Compose.
+\end{enumerate}
+
+
+\subsection{Model danych}
+
+\begin{itemize}
+    \item \textbf{Metryka} nazwa mierzonej wielkości, np. \texttt{temperature\_\allowbreak{}celsius}.
+    \item \textbf{Etykiety} opisują źródło pomiaru, np. \texttt{device="cpu"} i \texttt{server="eu67"}.
+    \item \textbf{Szereg czasowy} identyfikowany przez nazwę metryki i kompletny zestaw etykiet.
+    \item \textbf{Punkt pomiarowy} składa się z znacznika czasu i pojedynczej wartości liczbowej f64.
+\end{itemize}
+
+
+\subsection{Podzbiór języka zapytań}
+
+Język będzie obsługiwał następujące konstrukcje:
+
+\begingroup
+\small
+\begin{longtable}{>{\raggedright\arraybackslash}p{\dimexpr 0.18\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.49\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.33\linewidth-2\tabcolsep\relax}}
+    \hline
+    \textbf{Konstrukcja} & \textbf{Przykład}                                                                                        & \textbf{Znaczenie}                                \\
+    \hline
+    \endfirsthead
+    \textbf{Konstrukcja} & \textbf{Przykład}                                                                                        & \textbf{Znaczenie}                                \\
+    \hline
+    \endhead
+    Wybór metryki        & \texttt{temperature\_\allowbreak{}celsius}                                                               & Wybór wszystkich szeregów o danej nazwie metryki. \\
+    \hline
+    Filtrowanie etykiet  & \texttt{temperature\_\allowbreak{}celsius\{\allowbreak{}device="cpu",\allowbreak{} server="eu67"}        & Wybór szeregów spełniających warunki dopasowania. \\
+    \hline
+    Średnia w czasie     & \texttt{avg\_\allowbreak{}over\_\allowbreak{}time(\allowbreak{}temperature\_\allowbreak{}celsius[5m])}   & Średnia arytmetyczna próbek w oknie.              \\
+    \hline
+    Minimum w czasie     & \texttt{min\_\allowbreak{}over\_\allowbreak{}time(\allowbreak{}temperature\_\allowbreak{}celsius[5m])}   & Najmniejsza wartość w oknie.                      \\
+    \hline
+    Maksimum w czasie    & \texttt{max\_\allowbreak{}over\_\allowbreak{}time(\allowbreak{}temperature\_\allowbreak{}celsius[5m])}   & Największa wartość w oknie.                       \\
+    \hline
+    Suma w czasie        & \texttt{sum\_\allowbreak{}over\_\allowbreak{}time(\allowbreak{}temperature\_\allowbreak{}celsius[5m])}   & Suma wartości próbek w oknie.                     \\
+    \hline
+    Liczba próbek        & \texttt{count\_\allowbreak{}over\_\allowbreak{}time(\allowbreak{}temperature\_\allowbreak{}celsius[5m])} & Liczba próbek w oknie.                            \\
+    \hline
+\end{longtable}
+\endgroup
+
+Filtrowanie i agregację można łączyć:
+
+\begin{verbatim}
+avg_over_time(temperature_celsius{service="api", instance="1"}[5m])
+\end{verbatim}
+
+\subsection{Poza MVP i możliwe rozszerzenia}
+
+Poza obowiązkowym zakresem pozostają:
+
+\begin{itemize}
+    \item Kompresja, automatyczna retencja i trwałe przechowywanie agregatów.
+    \item Agregacje pomiędzy szeregami: \texttt{sum}, \texttt{avg}, \texttt{min}, \texttt{max}, \texttt{count} oraz grupowanie przez \texttt{by} i \texttt{without}.
+    \item Pobieranie danych z \texttt{/metrics}. (active ingestion)
+    \item Osobny frontend, własna wtyczka Grafany, alertowanie i wykrywanie anomalii.
+\end{itemize}
+
+
+Kompresja, retencja oraz większy zakres języka zapytań mogą być zrealizowane w zależności od postępów w implementacji i dostępnego czasu.
+
+\section{Wymagania funkcjonalne i kryteria odbioru}
+
+\subsection*{FR-01: Zapis pomiarów}
+
+\textbf{Jako autor monitorowanego serwisu chcę przesyłać pomiary pojedynczo i paczkami przez HTTP JSON, aby przechowywać je w bazie.}
+
+\begin{itemize}
+    \item \textbf{Zakładając}, że baza działa, \textbf{gdy} klient przesyła poprawne pomiary, \textbf{wtedy} otrzymuje potwierdzenie, a zapisane punkty można odczytać.
+    \item \textbf{Gdy} żądanie jest niepoprawne, \textbf{wtedy} serwer zwraca odpowiedź z opisem błędu.
+\end{itemize}
+
+
+\subsection*{FR-02: Rozróżnianie szeregów}
+
+\textbf{Jako użytkownik chcę rozróżniać źródła tej samej metryki za pomocą etykiet, aby analizować wybrane serwisy i instancje.}
+
+\begin{itemize}
+    \item \textbf{Gdy} dwa pomiary mają tę samą nazwę metryki i ten sam zestaw etykiet zapisany w innej kolejności, \textbf{wtedy} należą do tego samego szeregu.
+    \item \textbf{Gdy} wartość etykiety różni się, \textbf{wtedy} pomiary należą do różnych szeregów.
+\end{itemize}
+
+
+\subsection*{FR-03: Trwałe przechowywanie}
+
+\textbf{Jako użytkownik chcę zachować zapisane dane po restarcie, aby móc analizować historię pomiarów.}
+
+\begin{itemize}
+    \item \textbf{Zakładając}, że klient otrzymał potwierdzenia zapisów, \textbf{gdy} serwer zostaje zatrzymany i ponownie uruchomiony z tym samym katalogiem danych, \textbf{wtedy} potwierdzone punkty i etykiety pozostają dostępne.
+    \item Potwierdzone zapisy podlegają gwarancji trwałości także przed zrzutem do bufora pamięciowego.
+\end{itemize}
+
+
+\subsection*{FR-04: Wykonywanie zapytań chwilowych i zakresowych}
+
+\textbf{Jako użytkownik chcę wykonywać zapytania dla pojedynczej chwili lub przedziału czasu, aby analizować przebieg pomiarów.}
+
+\begin{itemize}
+    \item \textbf{Gdy} użytkownik wskazuje metrykę, warunki etykiet i chwilę czasu, \textbf{wtedy} wynik zawiera dopasowane punkty z odpowiednich szeregów.
+    \item \textbf{Gdy} użytkownik wskazuje metrykę, warunki etykiet, przedział czasu i krok, \textbf{wtedy} wynik zawiera odpowiednio zagregowane punkty z dopasowanych szeregów, uporządkowane chronologicznie.
+    \item \textbf{Gdy} brak pasujących punktów, \textbf{wtedy} wynik jest pusty.
+    \item Zapytanie chwilowe oblicza wyrażenie dla wskazanej chwili
+    \item Zapytanie zakresowe oblicza wyrażenie w kolejnych chwilach od \textbf{start} do \textbf{end} z krokiem \textbf{step}.
+    \item Zapytania są dostępne przez /api/v1/query i /api/v1/query\_range, zgodnie z API Prometheusa.
+\end{itemize}
+
+
+\subsection*{FR-05: Parsowanie języka zapytań}
+
+\textbf{Jako użytkownik chcę wpisywać zapytania w ustalonym podzbiorze PromQL, aby wybierać dane i uruchamiać obliczenia.}
+
+\begin{itemize}
+    \item \textbf{Gdy} zapytanie odpowiada składni z sekcji 3.3, \textbf{wtedy} parser rozpoznaje metrykę, etykiety oraz ewentualną funkcję i okno czasu.
+    \item \textbf{Gdy} zapytanie jest błędne albo używa nieobsługiwanej konstrukcji, \textbf{wtedy} serwer odrzuca je z opisem błędu.
+\end{itemize}
+
+
+\subsection*{FR-06: Agregacja próbek w czasie}
+
+\textbf{Jako użytkownik chcę obliczać średnią, minimum, maksimum, sumę i liczbę próbek w oknie czasu, aby analizować przebieg pomiarów.}
+
+\begin{itemize}
+    \item \textbf{Gdy} wykonywana jest jedna z pięciu funkcji \texttt{*\_\allowbreak{}over\_\allowbreak{}time}, \textbf{wtedy} wynik jest zgodny z obliczeniami dla próbek w odpowiednim oknie z krokiem.
+    \item \textbf{Gdy} selektor obejmuje kilka szeregów, \textbf{wtedy} każdy szereg jest obliczany oddzielnie, bez agregowania próbek z różnych szeregów.
+\end{itemize}
+
+
+% \subsection*{FR-07: Odzyskiwanie po awarii procesu}
+
+% \textbf{Jako użytkownik chcę odzyskać dane po nieoczekiwanej awarii serwera, aby nie utracić potwierdzonych zapisów.}
+
+% \begin{itemize}
+%     \item \textbf{Gdy} proces bazy zostaje wymuszenie zakończony podczas zapisu, a następnie uruchomiony ponownie, \textbf{wtedy} wszystkie zapisy potwierdzone klientowi przed awarią pozostają dostępne.
+%     \item Los zapisów bez potwierdzenia nie jest gwarantowany. Test nie obejmuje awarii systemu operacyjnego, utraty zasilania ani fizycznego uszkodzenia nośnika.
+% \end{itemize}
+
+
+\subsection*{FR-07: Integracja z Grafaną i demonstracja}
+
+\textbf{Jako osoba analizująca telemetrię chcę zobaczyć dane i agregacje w Grafanie, aby ocenić działanie bazy.}
+
+\begin{itemize}
+    \item \textbf{Gdy} środowisko zostaje uruchomione według instrukcji, \textbf{wtedy} działają baza oraz Grafana z przygotowanym dashboardem.
+    \item \textbf{Gdy} użytkownik zmienia serwis i zakres czasu, \textbf{wtedy} wykresy pokazują odpowiadające im dane z bazy.
+    \item \textbf{Gdy} baza zostaje zrestartowana z zachowaniem wolumenu, \textbf{wtedy} dashboard ponownie umożliwia odczyt wcześniejszych danych.
+\end{itemize}
+
+\subsection*{FR-08: Buforowanie danych w pamięci}
+
+\textbf{Jako użytkownik chcę konfigurować czas przechowywania danych w buforze pamięciowym oraz opcjonalnie jego limit pamięci, aby dostosować działanie bazy do dostępnych zasobów.}
+
+\begin{itemize}
+    \item \textbf{Gdy} upływa skonfigurowany czas przechowywania punktu w buforze, \textbf{wtedy} baza przenosi go do docelowych plików na dysku i zwalnia zajmowaną pamięć.
+    \item \textbf{Gdy} dalsze przyjmowanie danych spowodowałoby przekroczenie limitu bufora, \textbf{wtedy} baza wykonuje wcześniejszy zrzut danych.
+    \item \textbf{Gdy} dane zostają przeniesione na dysk, \textbf{wtedy} wciąż pozostają dostępne w zapytaniach.
+\end{itemize}
+
+\subsection*{FR-09: Obsługa punktów out-of-order}
+
+\textbf{Jako użytkownik chcę móc skonfigurować bounded out-of-order ingestion, aby przyjmować pomiary z opóźnieniem w określonym zakresie czasu.}
+
+\begin{itemize}
+    \item \textbf{Gdy} punkt przychodzi z opóźnieniem nieprzekraczającym skonfigurowanego zakresu, \textbf{wtedy} baza przyjmuje go i zapisuje w odpowiednim szeregu.
+    \item \textbf{Gdy} punkt przychodzi z opóźnieniem większym niż skonfigurowany zakres, \textbf{wtedy} baza odrzuca go z opisem błędu.
+    \item Skonfigurowany zakres out-of-order ingestion jest zależny od czasu przechowywania w buforze. Punkty zrzucone na dysk nie podlegają edycji.
+\end{itemize}
+
+\section{Wymagania jakościowe}
+
+\begingroup
+\small
+\begin{longtable}{>{\raggedright\arraybackslash}p{\dimexpr 0.13\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.19\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.43\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.25\linewidth-2\tabcolsep\relax}}
+    \hline
+    \textbf{ID}                                                                                                                   & \textbf{Kategoria}                                                                      & \textbf{Kryterium}                                                                                                                                                                                               & \textbf{Weryfikacja}                          \\
+    \hline
+    \endfirsthead
+    \textbf{ID}                                                                                                                   & \textbf{Kategoria}                                                                      & \textbf{Kryterium}                                                                                                                                                                                               & \textbf{Weryfikacja}                          \\
+    \hline
+    \endhead
+    \textbf{NFR-01}                                                                                                               & Opóźnienie                                                                              & p95: zapis punktu \(\leq\) 100 ms, paczki 1000 punktów \(\leq\) 500 ms, odczyt 1000 punktów jednego szeregu \(\leq\) 200 ms, agregacja szeregu czasowego z próbkami znajdującymi się w buforze  \(\leq\) 500 ms. & Testy HTTP                                    \\
+    \hline
+    \textbf{NFR-02}                                                                                                               & Przepustowość                                                                           & Zapis \(\geq\) 10 000 potwierdzonych punktów/s w paczkach po 1000 punktów.                                                                                                                                       & Test obciążeniowy                             \\
+    \hline
+    \textbf{NFR-03}                                                                                                               & Skala i zasoby                                                                          & Baza obsługuje ciągły napływ co najmniej 10 000 punktów na sekundę przy skonfigurowanym czasie buforowania 30 minut i zużyciu pamięci procesu nieprzekraczającym 1Gb (około 300Mb danych w buforze)              & Pomiar procesu bazy                           \\
+    \hline
+    \textbf{NFR-04}                                                                                                               & Odporność na awarie                                                                     &
+    Brak utraty potwierdzonych zapisów w 20 próbach awarii procesu; ponowne uruchomienie bazy z milionem punktów w \(\leq\) 10 s. & Wymuszone zakończenie procesu podczas zapisu, restart i weryfikacja odzyskanych danych.                                                                                                                                                                                                                                                                    \\
+    \hline
+    \textbf{NFR-05}                                                                                                               & Obsługa błędów                                                                          & 100\% przypadków z zestawu błędnych żądań i zapytań kończy się odpowiedzią z opisem błędu, bez zakończenia procesu.                                                                                              & Testy parsera, walidacji i integracyjne HTTP. \\
+    \hline
+\end{longtable}
+\endgroup
+
+\section{Słownik pojęć}
+
+\begingroup
+\small
+\begin{longtable}{>{\raggedright\arraybackslash}p{\dimexpr 0.3\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.7\linewidth-2\tabcolsep\relax}}
+    \hline
+    \textbf{Pojęcie}                   & \textbf{Znaczenie w projekcie}                                                              \\
+    \hline
+    \endfirsthead
+    \textbf{Pojęcie}                   & \textbf{Znaczenie w projekcie}                                                              \\
+    \hline
+    \endhead
+    \textbf{Szereg czasowy}            & Uporządkowany w czasie zbiór pomiarów identyfikowany przez nazwę metryki i etykiety.        \\
+    \hline
+    \textbf{Metryka}                   & Nazwa mierzonej wielkości, np. \texttt{temperature\_\allowbreak{}celsius}.                  \\
+    \hline
+    \textbf{Etykieta}                  & Para nazwa–wartość opisująca źródło lub kontekst pomiaru.                                   \\
+    \hline
+    \textbf{PromQL}                    & Język zapytań Prometheusa; projekt realizuje wyłącznie podzbiór opisany w sekcji 3.3.       \\
+    \hline
+    \textbf{Okno czasu}                & Przedział próbek używanych przez funkcję czasową w danej chwili obliczenia.                 \\
+    \hline
+    \textbf{Krok}                      & Odstęp pomiędzy kolejnymi chwilami obliczenia zapytania zakresowego.                        \\
+    \hline
+    \textbf{Zakres czasu/okno czasowe} & Określony przedział czasu, w którym są analizowane dane.                                    \\
+    \hline
+    \textbf{Bufor}                     & Przestrzeń pamięciowa RAM, w której przechowywane są dane, przed zapisem na dysk.           \\
+    \hline
+    \textbf{Agregacja w czasie}        & Obliczenie jednej wartości z próbek danego szeregu w oknie                                  \\
+    \hline
+    \textbf{out-of-order}              & Punkt pomiarowy, który przychodzi z opóźnieniem w stosunku do wcześniej zapisanych punktów. \\
+    \hline
+\end{longtable}
+\endgroup
+
+\section{Harmonogram, podział odpowiedzialności i ryzyka}
+
+\subsection{Harmonogram na 15 tygodni}
+
+\begingroup
+\small
+\begin{longtable}{>{\raggedright\arraybackslash}p{\dimexpr 0.3\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.7\linewidth-2\tabcolsep\relax}}
+    \hline
+    \textbf{Termin}         & \textbf{Rezultat do przedstawienia}                                                                                      \\
+    \hline
+    \endfirsthead
+    \textbf{Termin}         & \textbf{Rezultat do przedstawienia}                                                                                      \\
+    \hline
+    \endhead
+    \textbf{Tygodnie 1–2}   & Wymagania, zakres, model danych, specyfikacja podzbioru PromQL z przykładami oraz wstępna architektura.                  \\
+    \hline
+    \textbf{Tygodnie 3–4}   & Prototyp zapisu i odczytu, parser selektorów oraz wczesny test integracji z Grafaną przez standardowe źródło Prometheus. \\
+    \hline
+    \textbf{Tygodnie 5–6}   & Trwały zapis, indeksowanie, filtrowanie etykiet i odczyt zakresów czasu.                                                 \\
+    \hline
+    \textbf{Tygodnie 7–8}   & Pięć funkcji czasowych oraz testy odzyskiwania po awarii procesu.                                                        \\
+    \hline
+    \textbf{Tygodnie 9–10}  & Zintegrowane demo z generatorami i Grafaną, test miliona punktów i testy zgodności języka.                               \\
+    \hline
+    \textbf{Tygodnie 11–12} & Ukończone MVP, testy akceptacyjne i zamknięcie zakresu nowych funkcji.                                                   \\
+    \hline
+    \textbf{Tygodnie 13–14} & Eksperymenty, analiza wyników oraz ukończenie tekstu pracy.                                                              \\
+    \hline
+    \textbf{Tydzień 15}     & Bufor na uwagi promotora, przegląd dokumentacji i próbę prezentacji.                                                     \\
+    \hline
+\end{longtable}
+\endgroup
+
+\subsection{Wstępny podział odpowiedzialności}
+
+\begingroup
+\small
+\begin{longtable}{>{\raggedright\arraybackslash}p{\dimexpr 0.3\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.7\linewidth-2\tabcolsep\relax}}
+    \hline
+    \textbf{Obszar}                                               & \textbf{Osoba}                             \\
+    \hline
+    \endfirsthead
+    \textbf{Obszar}                                               & \textbf{Osoba}                             \\
+    \hline
+    \endhead
+    Przechowanie, indeksowanie i odzyskiwanie danych              & Jan Zaborski                               \\
+    \hline
+    Przechowanie, Parser, wykonanie zapytań, integracja z Grafaną & Hubert Błonowski                           \\
+    \hline
+    Model danych i architektura systemu                           & Jan Zaborski, Hubert Błonowski             \\
+    \hline
+    testy, przeglądy kodu i eksperymenty                          & Jan Zaborski, Hubert Błonowski             \\
+    \hline
+    Dokumentacja i tekst pracy                                    & zgodnie z odpowiedzialnością za podsystemy \\
+    \hline
+\end{longtable}
+\endgroup
+
+\begin{landscape}
+    \subsection{Rejestr ryzyk}
+    \begingroup
+    \small
+    \begin{longtable}{>{\raggedright\arraybackslash}p{\dimexpr 0.08\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.19\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.17\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.1\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.14\linewidth-2\tabcolsep\relax}>{\raggedright\arraybackslash}p{\dimexpr 0.32\linewidth-2\tabcolsep\relax}}
+        \hline
+        \textbf{ID}     & \textbf{Zdarzenie ryzykowne}                          & \textbf{Prawdopodo\-bieństwo (L/M/H)} & \textbf{Wpływ (L/M/H/\allowbreak{}Crit)} & \textbf{Osoba odpowiedzialna} & \textbf{Strategia ograniczania ryzyka}                                                               \\
+        \hline
+        \endfirsthead
+        \textbf{ID}     & \textbf{Zdarzenie ryzykowne}                          & \textbf{Prawdopodo\-bieństwo (L/M/H)} & \textbf{Wpływ (L/M/H/\allowbreak{}Crit)} & \textbf{Osoba odpowiedzialna} & \textbf{Strategia ograniczania ryzyka}                                                               \\
+        \hline
+        \endhead
+        \textbf{RSK-01} & \textbf{Choroba/niezdolność do pracy członka zespołu} & L                                     & Crit                                     & Obaj autorzy                  & Wzajemne code review i regularne przeglądy kodu;                                                     \\
+        \hline
+        \textbf{RSK-02} & \textbf{Rozrost języka zapytań}                       & L                                     & M                                        & Hubert Błonowski              & Zamknięta lista konstrukcji i odrzucanie pozostałej składni; rozszerzenia dopiero po ukończeniu MVP. \\
+        \hline
+        \textbf{RSK-03} & \textbf{Niezgodność API z Grafaną}                    & M                                     & H                                        & Hubert Błonowski              & Zamknięta lista konstrukcji; rozszerzenia dopiero po MVP                                             \\
+        \hline
+        \textbf{RSK-04} & \textbf{Opóźnienie prac na tekstem}                   & H                                     & Crit                                     & Obaj autorzy                  & Pisanie równolegle z implementacją, agresywne ograniczenie prac nad nowymi funkcjami po 12. tygodniu \\
+        \hline
+        \textbf{RSK-05} & \textbf{Utrata dostępu do repozytorium na GitHubie}   & L                                     & Crit                                     & Jan Zaborski                  & Regularne kopie lokalne,                                                                             \\
+    \end{longtable}
+    \endgroup
+\end{landscape}
+\end{document}
