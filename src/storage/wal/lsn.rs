@@ -12,6 +12,8 @@ pub enum Durability {
     Written,
 }
 
+/// The published `written` LSN, a count for group
+/// commit and the flusher's handle to wake it.
 #[derive(Default)]
 pub struct Progress {
     written: watch::Sender<Lsn>,

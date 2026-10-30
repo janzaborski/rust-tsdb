@@ -7,11 +7,15 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
+/// The WAL threads: the flusher writes the buffer to the active segment,
+/// rotates and serves cuts, the syncer fdatasyncs it every `sync_interval`.
 pub(crate) struct Threads {
     flusher: Option<JoinHandle<()>>,
     syncer: Option<JoinHandle<()>>,
 }
 
+/// Handshake for `Wal::cut`: the caller asks the flusher to drain and rotate,
+/// then waits for the id of the segment it closed.
 #[derive(Default)]
 pub(crate) struct Cut {
     serial: Mutex<()>,

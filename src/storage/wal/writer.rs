@@ -10,9 +10,12 @@ use std::sync::Arc;
 const SCRATCH_KEEP: usize = 1 << 20;
 
 thread_local! {
+    /// Per-thread encoding buffer: a record is built here without any lock,
+    /// then copied into `WalBuffer`.
     static SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Handle for appending to the WAL and waiting on durability.
 #[derive(Clone)]
 pub struct WalWriter {
     shared: Arc<Shared>,
