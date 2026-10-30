@@ -53,7 +53,10 @@ async fn write_json(
     };
 
     match db.write(batch) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(lsn) => {
+            db.wait(lsn).await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{LabelSet, Sample, SeriesId, TimeRange};
-use crate::storage::{Index, MemTable, StorageError};
+use crate::storage::{Index, StorageError};
 
 const MAGIC: &[u8; 8] = b"MiNItsDB";
 
@@ -94,11 +94,15 @@ impl SegmentStore {
         ))
     }
 
-    pub fn flush(&mut self, table: &MemTable, index: &Index) -> Result<(), StorageError> {
-        if table.data.is_empty() {
+    pub fn flush(
+        &mut self,
+        series: &[(SeriesId, Vec<Sample>)],
+        index: &Index,
+    ) -> Result<(), StorageError> {
+        if series.is_empty() {
             return Ok(());
         }
-        let mut entries: Vec<_> = table.data.iter().collect();
+        let mut entries: Vec<_> = series.iter().collect();
         entries.sort_by_key(|(id, _)| id.0);
         let segment = Segment {
             series: entries
@@ -215,7 +219,7 @@ fn index_segment(
         if series.samples.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
             return Err(StorageError::CorruptSegment(path.display().to_string()));
         }
-        let id = index.encode(&series.labels);
+        let id = index.encode(&series.labels).id;
         let last = series.samples.last().unwrap().0;
         if latest.get(&id).is_some_and(|previous| first <= *previous)
             || ranges.insert(id, (first, last)).is_some()
