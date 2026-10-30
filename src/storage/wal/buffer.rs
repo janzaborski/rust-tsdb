@@ -3,6 +3,8 @@ use super::lsn::Lsn;
 use std::mem;
 use std::sync::Mutex;
 
+/// Records waiting to be written. Writers encode outside the lock and only
+/// copy in under it, the flusher swaps the whole Vec out.
 pub(crate) struct WalBuffer {
     inner: Mutex<Inner>,
     flush_threshold: usize,
