@@ -149,3 +149,6 @@ impl Drop for Wal {
         let _ = self.threads.join();
     }
 }
+
+#[cfg(test)]
+mod tests;
