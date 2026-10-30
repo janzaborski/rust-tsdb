@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use crate::model::{LabelSet, Matcher, Sample, SeriesId, TimeRange};
 use crate::storage::segment::SegmentStore;
-use crate::storage::{Index, MemTable, StorageError};
+use crate::storage::wal::{Durability, Lsn, ReplaySink, Wal, WalConfig, WalError, WalWriter};
+use crate::storage::{Index, Series, StorageError};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,21 +35,30 @@ pub enum DbError {
 
     #[error("database stopped after a storage failure; restart required")]
     StorageFailed,
+
+    #[error(transparent)]
+    Wal(#[from] WalError),
+}
+
+struct Persistence {
+    disk: SegmentStore,
+    wal: Wal,
 }
 
 #[derive(Default)]
 struct DbState {
-    store: MemTable,
     index: Index,
-    disk: Option<SegmentStore>,
-    latest: HashMap<SeriesId, u64>,
+    persistence: Option<Persistence>,
     buffered_samples: usize,
     max_buffer_samples: usize,
     failed: bool,
+    generation: u64,
 }
 
 pub struct Db {
     state: RwLock<DbState>,
+    wal: Option<WalWriter>,
+    durability: Durability,
 }
 
 impl Default for Db {
@@ -56,8 +66,11 @@ impl Default for Db {
         Self {
             state: RwLock::new(DbState {
                 max_buffer_samples: usize::MAX,
+                generation: 1,
                 ..DbState::default()
             }),
+            wal: None,
+            durability: Durability::None,
         }
     }
 }
@@ -70,49 +83,107 @@ impl Db {
 
     /// Open a database with persistent storage in the given directory.
     pub fn open(path: impl AsRef<Path>, max_buffer_samples: usize) -> Result<Self, DbError> {
+        let wal = WalConfig::new(path.as_ref().join("wal"));
+        Self::open_with(path, max_buffer_samples, wal, Durability::None)
+    }
+
+    pub fn open_with(
+        path: impl AsRef<Path>,
+        max_buffer_samples: usize,
+        wal: WalConfig,
+        durability: Durability,
+    ) -> Result<Self, DbError> {
         if max_buffer_samples == 0 {
             return Err(DbError::InvalidBufferSize);
         }
         let mut index = Index::new();
         let (disk, latest) = SegmentStore::open(path.as_ref(), &mut index)?;
+        for (id, timestamp) in latest {
+            if let Some(series) = index.get(id) {
+                series.lock().restore_newest(timestamp);
+            }
+        }
+
+        let mut replay = Replay {
+            index: &mut index,
+            buffered_samples: 0,
+        };
+        let wal = Wal::open(wal, &mut replay)?;
+        let buffered_samples = replay.buffered_samples;
+        let replayed = wal.recovery().last_segment;
+        let writer = wal.writer();
+
+        let mut state = DbState {
+            index,
+            persistence: Some(Persistence { disk, wal }),
+            buffered_samples,
+            max_buffer_samples,
+            failed: false,
+            generation: 1,
+        };
+        if let Some(last) = replayed {
+            state.flush()?;
+            if let Some(p) = &state.persistence {
+                p.wal.remove_through(last)?;
+            }
+        }
         Ok(Self {
-            state: RwLock::new(DbState {
-                index,
-                disk: Some(disk),
-                latest,
-                max_buffer_samples,
-                ..DbState::default()
-            }),
+            state: RwLock::new(state),
+            wal: Some(writer),
+            durability,
         })
     }
 
-    pub fn write(&self, batch: WriteBatch) -> Result<(), DbError> {
+    pub fn write(&self, batch: WriteBatch) -> Result<Lsn, DbError> {
         let mut state = self.state.write().unwrap();
         if state.failed {
             return Err(DbError::StorageFailed);
         }
+        let generation = state.generation;
+        let mut new_series: Vec<Arc<Series>> = Vec::new();
+        let mut logging = HashSet::new();
+        let mut entries: Vec<(Arc<Series>, Vec<Sample>)> = Vec::new();
         for (labels, samples) in batch.series {
             if samples.is_empty() {
                 continue;
             }
-            let id = state.index.encode(&labels);
+            let series = state.index.encode(&labels);
+            if !series.lock().is_logged(generation) && logging.insert(series.id) {
+                new_series.push(Arc::clone(&series));
+            }
+            entries.push((series, samples));
+        }
+
+        let lsn = match &self.wal {
+            Some(wal) => wal.append(
+                new_series.iter().map(|s| (s.id, &*s.labels)),
+                entries.iter().map(|(s, samples)| (s.id, &samples[..])),
+            )?,
+            None => Lsn::default(),
+        };
+
+        for series in &new_series {
+            series.lock().mark_logged(generation);
+        }
+
+        for (series, samples) in entries {
+            let mut series = series.lock();
             for s in samples {
-                if state
-                    .latest
-                    .get(&id)
-                    .is_some_and(|last| s.timestamp <= *last)
-                {
-                    continue;
+                if series.append(s) {
+                    state.buffered_samples += 1;
                 }
-                state.store.append(id, s)?;
-                state.latest.insert(id, s.timestamp);
-                state.buffered_samples += 1;
             }
         }
         if state.buffered_samples >= state.max_buffer_samples {
             state.flush()?;
         }
-        Ok(())
+        Ok(lsn)
+    }
+
+    pub async fn wait(&self, lsn: Lsn) {
+        if let Some(wal) = &self.wal {
+            wal.wait(lsn, self.durability).await;
+        }
     }
 
     pub fn flush(&self) -> Result<(), DbError> {
@@ -145,17 +216,18 @@ impl Db {
             .iter()
             .filter_map(|id| state.index.labels_for(*id).map(|labels| (labels, *id)))
             .collect();
-        let mut disk_samples = match &state.disk {
-            Some(disk) => disk.read(&ids, &labels, range)?,
+        let mut disk_samples = match &state.persistence {
+            Some(p) => p.disk.read(&ids, &labels, range)?,
             None => HashMap::new(),
         };
         for id in ids {
             let mut samples = disk_samples.remove(&id).unwrap_or_default();
-            if state.store.data.contains_key(&id) {
-                samples.extend(state.store.read(id, range)?);
-            }
-            if let Some(labels) = state.index.labels_for(id) {
-                out.push(SeriesResult { labels, samples });
+            if let Some(series) = state.index.get(id) {
+                samples.extend_from_slice(series.lock().range(range));
+                out.push(SeriesResult {
+                    labels: LabelSet::clone(&series.labels),
+                    samples,
+                });
             }
         }
         Ok(out)
@@ -167,16 +239,49 @@ impl DbState {
         if self.buffered_samples == 0 {
             return Ok(());
         }
-        let Some(disk) = &mut self.disk else {
+        let Some(p) = &mut self.persistence else {
             return Ok(());
         };
-        if let Err(error) = disk.flush(&self.store, &self.index) {
+        let cut = p.wal.cut();
+        let table: Vec<(SeriesId, Vec<Sample>)> = self
+            .index
+            .resolve(&[])
+            .into_iter()
+            .filter_map(|id| {
+                let samples = self.index.get(id)?.lock().take_samples();
+                (!samples.is_empty()).then_some((id, samples))
+            })
+            .collect();
+        if let Err(error) = p.disk.flush(&table, &self.index) {
             self.failed = true;
             return Err(error.into());
         }
-        self.store = MemTable::new();
         self.buffered_samples = 0;
+        self.generation += 1;
+        p.wal.remove_through(cut)?;
         Ok(())
+    }
+}
+
+struct Replay<'a> {
+    index: &'a mut Index,
+    buffered_samples: usize,
+}
+
+impl ReplaySink for Replay<'_> {
+    fn series(&mut self, labels: LabelSet) -> SeriesId {
+        self.index.encode(&labels).id
+    }
+
+    fn samples(&mut self, id: SeriesId, samples: Vec<Sample>) {
+        if let Some(series) = self.index.get(id) {
+            let mut series = series.lock();
+            for s in samples {
+                if series.append(s) {
+                    self.buffered_samples += 1;
+                }
+            }
+        }
     }
 }
 
@@ -230,7 +335,17 @@ mod tests {
             ],
         })
         .unwrap();
-        assert!(db.state.read().unwrap().store.data.is_empty());
+        let state = db.state.read().unwrap();
+        assert!(
+            state.index.resolve(&[]).iter().all(|id| state
+                .index
+                .get(*id)
+                .unwrap()
+                .lock()
+                .samples()
+                .is_empty())
+        );
+        drop(state);
 
         db.write(WriteBatch {
             series: vec![(labels("a"), vec![Sample::new(300, 4.0)])],
