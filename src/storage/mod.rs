@@ -3,11 +3,12 @@
 use thiserror::Error;
 
 pub mod index;
-pub mod mem_table;
 pub mod segment;
+pub mod series;
+pub mod wal;
 
 pub use index::Index;
-pub use mem_table::MemTable;
+pub use series::Series;
 
 #[derive(Error, Debug)]
 pub enum StorageError {

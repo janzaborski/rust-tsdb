@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Label {
     pub name: String,
     pub value: String,
@@ -17,7 +16,9 @@ impl Label {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-pub struct LabelSet(BTreeMap<String, String>);
+pub struct LabelSet {
+    labels: Vec<Label>,
+}
 
 impl LabelSet {
     pub fn new() -> Self {
@@ -25,38 +26,65 @@ impl LabelSet {
     }
 
     pub fn from_labels(labels: impl IntoIterator<Item = Label>) -> Self {
-        let mut set = Self::new();
-        for label in labels {
-            set.insert_label(label);
-        }
-        set
+        let mut v: Vec<Label> = labels.into_iter().collect();
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        v.dedup_by(|a, b| {
+            if a.name == b.name {
+                std::mem::swap(a, b);
+                true
+            } else {
+                false
+            }
+        });
+        Self::from_sorted_unchecked(v)
+    }
+
+    pub fn from_sorted_unchecked(labels: Vec<Label>) -> Self {
+        Self { labels }
     }
 
     /// Returns metric name if it exists (that is label named __name__)
     pub fn metric_name(&self) -> Option<&str> {
-        self.0.get("__name__").map(String::as_str)
+        self.get("__name__")
     }
 
     /// Returns the value of the label with the given name, if it exists.   
     pub fn get(&self, name: &str) -> Option<&str> {
-        self.0.get(name).map(String::as_str)
+        self.labels
+            .binary_search_by(|l| l.name.as_str().cmp(name))
+            .ok()
+            .map(|i| self.labels[i].value.as_str())
     }
 
     pub fn insert_label(&mut self, label: Label) {
-        self.0.insert(label.name, label.value);
+        match self
+            .labels
+            .binary_search_by(|existing| existing.name.cmp(&label.name))
+        {
+            Ok(i) if self.labels[i] == label => {}
+            Ok(i) => self.labels[i] = label,
+            Err(i) => self.labels.insert(i, label),
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.labels.is_empty()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+    pub fn len(&self) -> usize {
+        self.labels.len()
     }
 }
 
+type PairFn<'a> = fn(&'a Label) -> (&'a String, &'a String);
+
 impl<'a> IntoIterator for &'a LabelSet {
     type Item = (&'a String, &'a String);
-    type IntoIter = std::collections::btree_map::Iter<'a, String, String>;
+    type IntoIter = std::iter::Map<std::slice::Iter<'a, Label>, PairFn<'a>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
+        self.labels
+            .iter()
+            .map((|l| (&l.name, &l.value)) as PairFn<'a>)
     }
 }
 
@@ -77,7 +105,7 @@ impl Sample {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct SeriesId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,7 +174,7 @@ mod tests {
         set.insert_label(Label::new("host", "a"));
 
         assert_eq!(set.get("host"), Some("a"));
-        assert_eq!(set.0.len(), 1);
+        assert_eq!(set.len(), 1);
     }
 
     #[test]
@@ -156,7 +184,7 @@ mod tests {
         set.insert_label(Label::new("host", "b"));
 
         assert_eq!(set.get("host"), Some("b"));
-        assert_eq!(set.0.len(), 1);
+        assert_eq!(set.len(), 1);
     }
 
     #[test]
@@ -227,6 +255,6 @@ mod tests {
         let set = LabelSet::from_labels([Label::new("host", "a"), Label::new("host", "b")]);
 
         assert_eq!(set.get("host"), Some("b"));
-        assert_eq!(set.0.len(), 1);
+        assert_eq!(set.len(), 1);
     }
 }
