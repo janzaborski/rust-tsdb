@@ -1,0 +1,764 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[polish]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{lmodern,microtype}
+\usepackage{array,longtable,booktabs,tabularx}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx,xcolor,tikz,listings}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,shapes.geometric,shapes.multipart}
+\usepackage[hidelinks,unicode]{hyperref}
+\usepackage{xurl}
+\usepackage{bookmark}
+\usepackage{enumitem}
+
+\definecolor{accent}{HTML}{245777}
+\definecolor{pale}{HTML}{EDF3F7}
+\definecolor{codebg}{HTML}{F5F5F5}
+\hypersetup{
+  pdftitle={TSDB -- architektura systemu},
+  pdfauthor={Hubert Błonowski, Jan Zaborski}
+}
+\setlength{\emergencystretch}{2em}
+\setlength{\parskip}{0.35em}
+\setlength{\parindent}{0pt}
+\setcounter{tocdepth}{1}
+\setlist{itemsep=0.15em,topsep=0.3em}
+\renewcommand{\arraystretch}{1.18}
+\setlength{\tabcolsep}{2.8pt}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\code}[1]{\expandafter\nolinkurl\expandafter{\detokenize{#1}}}
+\newcommand{\tabhead}[1]{\toprule #1\\ \midrule\endfirsthead
+  \toprule #1\\ \midrule\endhead \bottomrule\endfoot}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  frame=single,rulecolor=\color{black!15},
+  breaklines=true,columns=fullflexible,keepspaces=true,
+  showstringspaces=false,tabsize=2,
+  aboveskip=0.8em,belowskip=0.8em
+}
+\tikzset{
+  box/.style={draw=accent,rounded corners=2pt,fill=pale,
+    align=center,font=\small,minimum height=11mm,text width=36mm},
+  external/.style={box,fill=white,draw=black!60},
+  arrow/.style={-{Latex[length=2mm]},thick,draw=accent},
+  note/.style={font=\scriptsize,align=center,fill=white,inner sep=2pt},
+  state/.style={box,text width=28mm,minimum height=10mm},
+  umlclass/.style={draw=accent,fill=pale,rectangle split,
+    rectangle split parts=3,rectangle split part align={left,left,left},
+    align=left,font=\scriptsize,
+    inner sep=5pt,text width=43mm},
+  assoc/.style={thick,draw=accent},
+  compose/.style={{Diamond[fill=accent,length=2mm]}-,thick,draw=accent},
+  usecase/.style={ellipse,draw=accent,fill=pale,align=center,
+    font=\small,text width=36mm,minimum height=13mm}
+}
+
+
+\begin{document}
+\raggedbottom
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+  \centering
+  {\large Politechnika Warszawska\\
+    Wydział Matematyki i Nauk Informacyjnych\par}
+  \vspace{2.1cm}
+  {\Large Projekt zespołowy -- laboratorium 2\par}
+  \vspace{1.2cm}
+  {\huge\bfseries Implementacja bazy danych\\
+    szeregów czasowych\\w języku Rust\par}
+  \vspace{1.1cm}
+  {\LARGE Architektura systemu\par}
+  \vspace{1.4cm}
+  \begin{tabular}{rl}
+    Autorzy:          & Hubert Błonowski       \\ & Jan Zaborski\\[.5em]
+    Promotor:         & mgr inż. Paweł Sobótka \\[.5em]
+    Wersja dokumentu: & 1.0                    \\
+    Data:             & 3 listopada 2026 r.
+  \end{tabular}
+  \vfill
+  \url{https://github.com/janzaborski/rust-tsdb}
+  \vspace{.8cm}
+\end{titlepage}
+\hypersetup{pageanchor=true}
+\pagenumbering{roman}
+
+\section*{Streszczenie}
+Dokument przedstawia projekt jednowęzłowej bazy danych szeregów czasowych:
+podział na moduły, model danych, zapis i odczyt, przechowywanie na dysku
+oraz odzyskiwanie po awarii. Opisuje wykonywanie zapytań, komunikację HTTP,
+integrację z Grafaną i granice dostępu do systemu.
+Jest specyfikacją docelową. Parametry wydajnościowe są celami do weryfikacji.
+
+\section*{Historia zmian}
+\begin{tabularx}{\linewidth}{P{15mm}P{28mm}P{37mm}Y}
+  \toprule
+  Wersja & Data       & Autorzy                           & Zakres \\ \midrule
+  1.0    & 03.11.2026 & H. Błonowski,\newline J. Zaborski &
+  Napisanie dokumentu architektury systemu.                        \\
+  \bottomrule
+\end{tabularx}
+\par
+
+\begingroup
+\footnotesize
+\setlength{\parskip}{0pt}
+\makeatletter
+\renewcommand*\l@section[2]{%
+  \@dottedtocline{1}{0em}{1.8em}{\bfseries #1}{#2}}
+\makeatother
+\tableofcontents
+\endgroup
+\clearpage
+\pagenumbering{arabic}
+
+\section{Cel, zakres i główne decyzje}
+\label{sec:scope}
+Celem jest własny silnik do przyjmowania pomiarów, przechowywania historii
+i wykonywania agregacji czasowych. Użytkownik analizuje dane w Grafanie.
+Zakres obejmuje HTTP, etykiety, pięć agregacji,
+out-of-order w otwartym buforze oraz wdrożenie w Docker Compose.
+
+Bloki aktywne i zamrożone umożliwiają przyjmowanie pomiarów podczas
+zapisu segmentów. Poza zakresem pierwszej wersji pozostają klaster,
+replikacja, kompresja, retencja, kompaktowanie, alertowanie i własny frontend.
+Backup wymaga zatrzymania bazy i skopiowania katalogu danych.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}
+    \draw[draw=accent,rounded corners] (0.6,0.6) rectangle (11,-6.3);
+    \node[font=\small\bfseries,anchor=north] at (5.8,0.5)
+    {TSDB z interfejsem Grafany};
+    \foreach \x/\y/\id/\name in {-1/-.9/prod/Producent,-1/-4.2/anal/Analityk,
+        12.4/-2.6/ops/Operator} {
+        \coordinate (\id) at (\x,\y);
+        \draw[thick] (\x,\y+.6) circle (.15);
+        \draw[thick] (\x,\y+.45) -- (\x,\y-.12)
+        (\x-.33,\y+.25) -- (\x+.33,\y+.25)
+        (\x,\y-.12) -- (\x-.28,\y-.5)
+        (\x,\y-.12) -- (\x+.28,\y-.5);
+        \node[font=\small,below] at (\x,\y-.55) {\name};
+      }
+    \node[usecase] (ingest) at (3.6,-1.2) {Zapis pomiarów\\FR-01, 02, 03, 09};
+    \node[usecase] (query) at (3.6,-3.4) {Zapytanie chwilowe\\lub zakresowe\\FR-04, 05, 06};
+    \node[usecase] (dash) at (3.6,-5.4) {Analiza dashboardu\\FR-07};
+    \node[usecase,text width=28mm] (run) at (8.6,-1.5)
+    {Konfiguracja, start\\i restart bazy};
+    \node[usecase,text width=28mm] (status) at (8.6,-4)
+    {Kontrola zdrowia\\i gotowości};
+    \draw[assoc] (prod) -- (ingest);
+    \draw[assoc] (anal) -- (query);
+    \draw[assoc] (anal) -- (dash);
+    \draw[assoc] (ops) -- (run);
+    \draw[assoc] (ops) -- (status);
+  \end{tikzpicture}
+  \caption{Diagram przypadków użycia UML.}
+  \label{fig:usecases}
+\end{figure}
+
+\section{Architektura i odpowiedzialności modułów}
+\label{sec:architecture}
+Przeglądarka komunikuje się z Grafaną. Jej serwer odpytuje TSDB.
+Pomiary są przyjmowane przez API HTTP. Silnik korzysta z lokalnego systemu plików.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}[font=\small]
+    \draw[draw=accent,thick,fill=black!1] (0,0) rectangle (14,-7.7);
+    \node[anchor=north west,align=left] at (.2,-.15)
+    {\textit{<<device>>} Host Linux x86-64};
+    \node[external,text width=40mm] (browser) at (3,-1.45)
+    {Przeglądarka\\Grafana UI};
+    \draw[draw=black!50,dashed] (.5,-2.8) rectangle (13.5,-5.5);
+    \node[anchor=north,font=\scriptsize,align=center] at (7,-2.95)
+    {\textit{<<executionEnvironment>>}\\Docker Compose, sieć tsdb-net};
+    \node[box,text width=38mm] (grafana) at (3,-4.4)
+    {\textit{<<container>>}\\grafana :3000};
+    \node[box,text width=42mm] (db) at (10,-4.4)
+    {\textit{<<container>>}\\tsdb / Rust :8080};
+    % \node[external,text width=42mm] (config) at (3,-6.8)
+    % {\textit{<<artifact>>}\\YAML źródła + JSON dashboardu};
+    \node[external,text width=42mm] (data) at (10,-6.8)
+    {Wolumen tsdb-data\\\code{/var/lib/tsdb}};
+    \draw[assoc] (browser) -- node[note,right]{HTTP\\127.0.0.1:3000} (grafana);
+    \draw[assoc] (grafana) -- node[note,above]{HTTP / JSON\\http://tsdb:8080} (db);
+    \draw[assoc] (db.south east) -- (11.2,-5.4) --
+    node[note,right]{lokalne I/O} (11.2,-6.1) -- (data.north east);
+    % \draw[assoc] (config.west) -- (.7,-6.8) |-
+    % node[note,pos=.6,left]{mount\\read-only} (grafana.west);
+  \end{tikzpicture}
+  \caption{Wdrożenie na jednym hoście.}
+  \label{fig:deployment}
+\end{figure}
+
+Adapter HTTP zna protokół, parser zna składnię, a silnik zna dane
+i pliki. Dzięki temu magazyn można rozwijać/testować bez HTTP,
+a wykonawcę zapytań z pamięciowym interfejsem odczytu.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}
+    \node[box,text width=95mm] (http) at (0,0)
+    {Adapter HTTP: zapis, API Prometheus, stan procesu};
+    \node[box] (write) at (-3,-2) {Koordynator zapisu\\podział na szeregi};
+    \node[box] (query) at (3,-2) {Parser i wykonawca\\zapytań (plan)};
+    \node[box,text width=108mm] (engine) at (0,-4.2)
+    {Silnik: Index, indeks etykiet, Series z własnymi blokadami i blokami};
+    \node[box] (wal) at (-3,-6.2) {Dziennik WAL\\zapis w tle};
+    \node[box] (segment) at (3,-6.2) {Flush w tle\\segmenty i manifest};
+    \draw[arrow] (http.south) -- ++(0,-0.4) -| (write.north);
+    \draw[arrow] (http.south) -- ++(0,-0.4) -| (query.north);
+    \draw[arrow] (write) -- (engine.north -| write);
+    \draw[arrow] (query) -- (engine.north -| query);
+    \draw[arrow] (engine.south -| wal) -- (wal);
+    \draw[arrow] (engine.south -| segment) -- (segment);
+  \end{tikzpicture}
+  \caption{Zależności logiczne. }
+\end{figure}
+
+\par
+\begin{tabularx}{\linewidth}{P{38mm}Y}
+  \toprule
+  Moduł              & Odpowiedzialność i kontrakt                                      \\ \midrule
+  HTTP i walidacja   & Dekodowanie, kanonizacja, limity i błędy,
+  wywołanie zapisu lub zapytania.                                                       \\
+  Koordynator zapisu & Podział pracy według szeregów,
+  walidacja punktów i raportowanie częściowego wyniku.                                  \\
+  Index i Series     & Klucz $\leftrightarrow$ Series, dobór po etykietach,
+  aktywny bufor, bloki zamrożone i segmenty dyskowe.                                    \\
+  WAL                & Dziennik operacji, potwierdzanie zapisu i odtwarzanie po awarii. \\
+  Magazyn segmentów  & Niezmienne pliki, katalog danych i odzyskiwanie po awarii.       \\
+  Parser i wykonawca & Analiza składni, plan, odczyt i obliczenia,
+  przygotowanie wyniku zapytania.                                                       \\
+  \bottomrule
+\end{tabularx}
+
+\section{Model danych i współbieżność}
+\label{sec:model}
+
+\code{Index} jest katalogiem szeregów i indeksem etykiet,
+a \code{Series} reprezentuje pojedynczy szereg. Są to nazwy używane w kodzie.
+Klucz szeregu to \code{LabelSet}, a pomiar to \code{Sample}.
+Model obejmuje bufor aktywny, niezmienne bloki oczekujące na zapis
+i segmenty dyskowe. Równoległy odczyt oraz obsługa zamrożonych bloków
+opisują stan docelowy
+
+Szereg identyfikuje nazwa metryki i kanonicznie posortowane etykiety.
+Wewnętrzny LabelSet zawiera także \code{__name__}.
+Punkt to czas Unix w milisekundach (u64) i skończona wartość f64.
+Para zajmuje 16 B. SeriesId jest lokalny dla head/WAL i może zmienić
+się po restarcie. Segmenty i manifest identyfikują szeregi przez klucze.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}
+    \node[umlclass,text width=56mm] (map) at (0,0) {
+    \textbf{Index}\nodepart{second}
+    inverted: HashMap<LabelSet, Arc<Series>{}>\\
+    forward: HashMap<SeriesId, Arc<Series>{}>\\
+    posting\_index: HashMap<String,\\
+    HashMap<String, Vec<SeriesId>{}>{}>\\
+    all\_ids: Vec<SeriesId>, next\_id: SeriesId
+    \nodepart{third}encode(labels), get(id)\\resolve(matchers), id\_for(labels)};
+    \node[umlclass,text width=45mm] (ts) at (8,0) {
+      \textbf{Series}\nodepart{second}
+      id: SeriesId\\labels: Arc<LabelSet>\\
+      state: Mutex<SeriesState>
+      \nodepart{third}new(id, labels), lock()};
+    \node[umlclass,text width=50mm] (st) at (8,-3.4) {
+      \textbf{SeriesState}\nodepart{second}
+      samples: Vec<Sample>\\
+      newest: Option<u64>\\logged\_gen: u64
+      \nodepart{third}accepts(timestamp), append(sample)\\
+      range(TimeRange), take\_samples()\\
+      is\_logged(g), mark\_logged(g)};
+    \node[umlclass,text width=43mm] (mut) at (0,-3.4) {
+      \textbf{MutableBlock} (plan)\nodepart{second}
+      samples: Vec<Sample> \{sorted\}
+      \nodepart{third}insert(sample), slice(bounds)};
+    \node[umlclass,text width=43mm] (froz) at (0,-6.3) {
+    \textbf{FrozenBlock} (plan)\nodepart{second}
+    samples: Vec<Sample>\\\{immutable, shared by Arc\}
+    \nodepart{third}slice(bounds)};
+    \node[umlclass,text width=50mm] (disk) at (8,-6.3) {
+      \textbf{BlockDescriptor} (plan)\nodepart{second}
+      segment, min/max, offset, count
+      \nodepart{third}read(bounds)};
+    \draw[assoc] (map) -- node[note,pos=.12,above]{1}
+    node[note,pos=.83,above]{0..*} (ts);
+    \draw[compose] (ts) -- node[note,right]{1 : 1} (st);
+    \draw[compose] (st) -- node[note,above]{active: 1} (mut);
+    \draw[assoc] (st.south west) -- ++(-0.8,0) |- node[note,pos=.7,above]
+      {frozen: 0..1} (froz.east);
+    \draw[compose] (st) -- node[note,right]{persisted: 0..*} (disk);
+  \end{tikzpicture}
+  \caption{Model head.}
+  \label{fig:classes}
+\end{figure}
+
+Aktywny bufor utrzymuje pomiary w kolejności czasu. Opóźniony pomiar
+wymaga wstawienia we właściwe miejsce. Zamrożenie przekazuje bufor
+do zapisu bez pełnej kopii. Nowe pomiary trafiają do kolejnego bufora.
+Widok zapytania kopiuje potrzebne dane aktywne i współdzieli niezmienne bloki.
+
+\subsection{Współbieżność i widoczność danych}
+\label{sec:concurrency}
+Paczka jest jednostką transportową, a nie transakcją. Jej punkty mogą
+być publikowane i odrzucane niezależnie. Błąd jednego pomiaru nie wycofuje
+wcześniejszych zapisów, a odczyt może zobaczyć część przetwarzanej paczki.
+Nie zapewnia się izolacji ani wspólnej migawki czasu dla wielu szeregów.
+
+Koordynator rozdziela pracę według szeregów. Pracownik utrzymuje blokadę
+tylko jednego szeregu i przetwarza małą porcję pomiarów, następnie ją zwalnia.
+Nie zbiera blokad wszystkich szeregów paczki. Rejestracja nowego klucza
+w katalogu jest krótka. Kodowanie, odczyt plików i oczekiwanie na
+potwierdzenie dziennika nie blokują katalogu.
+
+Zapytanie utrwala dane osobno dla każdego wybranego szeregu i zwalnia
+jego blokadę przed przejściem do następnego. Poszczególne szeregi mogą
+odpowiadać różnym chwilom odczytu. Szeregi utworzone w trakcie zapytania
+mogą być pominięte. Jednoczesny zrzut na dysk nie może powodować
+podwójnego zwracania ani pomijania już wybranych próbek.
+
+Pozostają gwarancje poprawnego pojedynczego pomiaru, chronologicznego
+odczytu i odzyskiwania potwierdzonych zapisów. Zmniejszenie zakresu blokad
+ogranicza wzajemne oczekiwanie. Koszt wspólnego dziennika i obciążonych
+szeregów nadal wymaga pomiaru.
+
+\subsection{Duplikaty i opóźnione punkty}
+Identyczny punkt w aktywnym buforze jest duplikatem bez zmian.
+Inna wartość dla tego samego czasu odrzuca tylko ten punkt jako konflikt.
+Nie modyfikuje się zamkniętych zakresów, także dla identycznego duplikatu.
+Dla nowego punktu obowiązuje
+\[
+  t\geq H_s-W,
+\]
+gdzie $H_s$ to największy przyjęty czas,
+a $W$ okno opóźnienia (domyślnie 5 min).
+Każdy punkt porównuje się ze stanem szeregu w chwili jego przetwarzania.
+W obrębie pracy dla jednego szeregu pomiary porządkuje się po czasie.
+Równe czasy zachowują kolejność wejścia.
+
+\section{Ścieżka zapisu i architektura WAL}
+\label{sec:write}
+\label{sec:wal-runtime}
+WAL (Write-Ahead Log) pozwala odzyskać pomiary, które nie trafiły
+jeszcze do segmentów danych. Po sprawdzeniu składni żądania walidacja
+i rezerwacja pamięci odbywają się dla kolejnych punktów lub małych porcji
+jednego szeregu. Poprawne pomiary trafiają do dziennika i są udostępniane
+zapytaniom. Błędne są raportowane osobno.
+
+Paczka HTTP może tworzyć wiele niezależnych wpisów dziennika, a pojedynczy
+wpis może łączyć kilka pomiarów dla wydajności. Granica wpisu nie ustanawia
+transakcji całego żądania. Awaria lub przerwanie przetwarzania może
+pozostawić tylko część pomiarów paczki. Utrata połączenia nie wycofuje
+już przyjętych danych.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}
+    \foreach \x/\name in {0/HTTP,3/Zapis,6/Bufor WAL,10/Zapis w tle (pagecache),14/Synchronizacja} {
+        \node[font=\small\bfseries] at (\x,.3) {\name};
+        \draw[dashed,black!35] (\x,0) -- (\x,-5.4);
+      }
+    \draw[arrow] (0,-.5) -- node[note,above]{porcja szeregu} (3,-.5);
+    \draw[arrow] (3,-1.2) -- node[note,above]{wpis do dziennika} (6,-1.2);
+    \draw[arrow,dashed] (6,-1.8) -- node[note,above]{przyjęcie wpisu} (3,-1.8);
+    \draw[arrow,dashed] (3,-2.45) -- node[note,above]{none: sukces} (0,-2.45);
+    \node[note] at (3,-3.0) {udostępnienie danych\\zwolnienie blokad};
+    \draw[arrow] (6,-3.6) -- node[note,above]{przekazanie porcji} (10,-3.6);
+    \draw[arrow,dashed] (10,-4.35) -- node[note,above]{written: sukces} (0,-4.35);
+    \node[note] at (14,-4.9) {okresowa synchronizacja\\bez potwierdzenia żądania};
+  \end{tikzpicture}
+  \caption{Przepływ zapisu małej porcji jednego szeregu. Paczka HTTP przechodzi
+    ten proces wielokrotnie. Nie stanowi jednej transakcji.}
+  \label{fig:write-sequence}
+\end{figure}
+
+Pracownik zapisu w tle przekazuje zebrane wpisy do pliku dziennika.
+W tym czasie kolejne żądania mogą korzystać z drugiego bufora.
+Osobny pracownik okresowo zleca synchronizację pliku z nośnikiem.
+Rozdzielenie tych zadań pozwala łączyć małe zapisy i ogranicza czas
+blokowania żądań.
+
+\begin{tabularx}{\linewidth}{P{27mm}Y}
+  \toprule
+  Tryb                   & Warunek odpowiedzi po udostępnieniu danych do odczytu        \\ \midrule
+  \code{none} (domyślny) & Przyjęte punkty opublikowane w pamięci. Awaria procesu
+  może spowodować ich utratę.                                                           \\
+  \code{written}         & Wpisy przyjętych punktów przekazane do systemu operacyjnego.
+  Przyjęte dane przetrwają awarię samego procesu przy sprawnym hoście i nośniku.
+  Nie ma gwarancji przetrwania utraty zasilania.                                        \\
+  \bottomrule
+\end{tabularx}
+
+Okresowa synchronizacja zmniejsza ryzyko utraty danych przy awarii hosta,
+ale nie jest osobnym potwierdzanym trybem żądania. Jej interwał nie
+wyznacza gwarantowanego okna utraty danych: zależy ono także od obciążenia
+i opóźnień urządzenia. Zapis do pamięci podręcznej systemu i trwałe
+utrwalenie na nośniku są odrębnymi operacjami.
+
+Po osiągnięciu progu rozmiaru dziennik przechodzi do kolejnego pliku.
+Pojedynczy wpis nie jest dzielony między pliki. Przed checkpointem silnik
+ustala zamknięty, zsynchronizowany zbiór plików. Dopiero po trwałym
+opublikowaniu odpowiadających im segmentów można usunąć tę część dziennika.
+Po awarii odtwarzane są pełne wpisy nowsze od checkpointu.
+Błąd zapisu lub synchronizacji zatrzymuje dalsze przyjmowanie danych.
+Żądania bez osiągniętego warunku potwierdzenia nie otrzymują sukcesu.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}
+    \node[umlclass,text width=48mm] (writer) at (0,0) {
+      \textbf{Interfejs WAL}\nodepart{second}porcje i tryb potwierdzenia
+      \nodepart{third}przyjęcie wpisu\\oczekiwanie na zapis};
+    \node[umlclass,text width=48mm] (shared) at (8,0) {
+      \textbf{Stan dziennika}\nodepart{second}
+      bufor wpisów\\postęp zapisu\\aktywny plik
+      \nodepart{third}koordynacja pracowników};
+    \node[umlclass,text width=48mm] (flush) at (0,-3.5) {
+      \textbf{Pracownik zapisu}\nodepart{second}porcja danych\\bieżący plik dziennika
+      \nodepart{third}zapis do systemu operacyjnego\\zamknięcie i zmiana pliku};
+    \node[umlclass,text width=48mm] (sync) at (8,-3.5) {
+      \textbf{Pracownik synchronizacji}\nodepart{second}ostatni postęp zapisu
+      \nodepart{third}okresowe utrwalanie pliku\\na nośniku};
+    \draw[assoc] (writer) -- (shared);
+    \draw[arrow,dashed] (flush.north east) -- node[note,sloped,above]
+    {porcja / postęp} (shared.south west);
+    \draw[arrow,dashed] (shared) -- node[note,right]{aktywny plik} (sync);
+    \draw[arrow,dashed] (writer) -- node[note,left]{pobudzenie} (flush);
+  \end{tikzpicture}
+  \caption{Elementy dziennika i ich odpowiedzialności. Zapis oraz synchronizacja
+    są oddzielnymi zadaniami wykonywanymi w tle.}
+  \label{fig:wal-classes}
+\end{figure}
+
+\section{Checkpoint, pliki i odzyskiwanie}
+\label{sec:checkpoint}
+\label{sec:storage}
+Pomiary są początkowo przechowywane w pamięci i dzienniku WAL.
+Co pewien czas baza zapisuje je do segmentów, czyli plików danych na dysku.
+Zapis jest uruchamiany po określonym czasie (domyślnie 30 minut)
+lub gdy bufor zbliża się do swojego limitu pamięci.
+
+\subsection{Zapis danych na dysk}
+\begin{enumerate}
+  \item Baza wydziela dane do zapisania. Nowe pomiary trafiają do
+        kolejnego bufora, dzięki czemu mogą napływać podczas zapisu.
+  \item W tle powstaje segment danych. Po zakończeniu zapisu baza
+        upewnia się, że plik został utrwalony na nośniku.
+  \item Baza aktualizuje manifest, czyli spis gotowych segmentów
+        i informację o tym, które wpisy WAL są już w nich zapisane.
+        Dopiero po utrwaleniu manifestu można zwolnić odpowiedni bufor
+        i usunąć niepotrzebną część WAL.
+\end{enumerate}
+Taki zakończony zapis tworzy checkpoint, czyli punkt, od którego
+baza może rozpocząć odtwarzanie nowszych danych po awarii.
+Przygotowanie danych wymaga krótkiej synchronizacji. Zapis plików
+odbywa się w tle. Pojedyncza paczka HTTP może zostać zapisana częściami
+w kolejnych segmentach.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}
+    \node[anchor=east,font=\small] at (0,0) {Zapisy};
+    \node[anchor=east,font=\small] at (0,-1.6) {Flush};
+    \draw[arrow] (.2,0) -- (12,0);
+    \draw[arrow] (.2,-1.6) -- (12,-1.6);
+    \draw[fill=black!12,draw=black!40] (2,.45) rectangle (4,-2);
+    \node[note] at (3,1) {przygotowanie danych\\do zapisu};
+    \node[note] at (1,.3) {Stary WAL};
+    \node[note] at (8,.3) {Nowe pomiary i nowy WAL};
+    \draw[very thick,accent] (4.1,-1.6) -- (9.5,-1.6);
+    \node[note,above] at (6.8,-1.55) {zapis segmentu i manifestu};
+    \node[note] at (10.8,-2.2) {usunięcie starego WAL};
+  \end{tikzpicture}
+  \caption{Zapis danych na dysk odbywa się w tle, podczas przyjmowania nowych pomiarów.}
+  \label{fig:checkpoint}
+\end{figure}
+
+\subsection{Odzyskiwanie po awarii}
+Przy uruchomieniu baza odczytuje manifest i gotowe segmenty, a następnie
+uzupełnia je pomiarami z WAL, które nie zostały jeszcze zapisane w segmentach.
+Niekompletny wpis na końcu dziennika może zostać pominięty. Uszkodzenie
+gotowych danych zatrzymuje uruchomienie, aby nie zwracać niepełnych wyników.
+Błąd zapisu na dysk zatrzymuje dalsze przyjmowanie pomiarów.
+
+\subsection{Buforowanie plików i kompaktowanie}
+Odczyt i zapis plików korzystają z pamięci podręcznej systemu operacyjnego
+(page cache).
+Każdy zrzut tworzy nowy segment.
+
+\section{Zapytania i komunikacja HTTP}
+\label{sec:language}
+\label{sec:http}
+
+Istniejące endpointy to \code{POST /api/v1/write_json}
+i \code{GET /api/v1/read}. Obecny zapis przyjmuje tablicę obiektów
+\code{labels}/\code{samples}, z polami \code{t}/\code{v} dla pomiaru.
+Poniższy kontrakt zapisu jest docelowym rozszerzeniem tego formatu.
+
+Obsługiwany podzbiór PromQL obejmuje nazwany selektor
+z dokładnym dopasowaniem etykiet, pięć funkcji czasowych i prosty skalar
+(np. 1+1 do próby połączenia). Bez regexów, zagnieżdżeń i agregacji
+między szeregami.
+\begin{lstlisting}
+temperature_celsius{service="api"}
+avg_over_time(temperature_celsius{service="api"}[5m])
+\end{lstlisting}
+Pozostałe funkcje: \code{min_over_time}, \code{max_over_time},
+\code{sum_over_time}, \code{count_over_time}.
+Selektor wybiera ostatnią próbkę z $[T-D,T]$ (lookback $D=5$ min).
+Funkcja działa osobno dla Series na $(T-R,T]$. Puste okno pomija Series,
+również dla count. Range powtarza obliczenie dla
+$T_k=start+k\cdot step\leq end$, korzystając z widoków poszczególnych szeregów.
+Indeks etykiet wybiera Series, indeksy czasowe ograniczają odczyt,
+a agregacje korzystają z przesuwanego okna.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}
+    \node[box] (parse) at (0,0) {Tekst i parametry\\parser + walidacja};
+    \node[box] (plan) at (5,0) {Plan\\szeregi i zakres};
+    \node[box] (snap) at (10,0) {Widok szeregu\\RAM + segmenty};
+    \node[box] (read) at (10,-2.2) {Odczyt zakresów\\strumień próbek};
+    \node[box] (eval) at (5,-2.2) {Obliczenia\\dla siatki czasu};
+    \node[box] (json) at (0,-2.2) {Wektor / macierz\\odpowiedź JSON};
+    \draw[arrow] (parse) -- (plan);
+    \draw[arrow] (plan) -- (snap);
+    \draw[arrow] (snap) -- (read);
+    \draw[arrow] (read) -- (eval);
+    \draw[arrow] (eval) -- (json);
+  \end{tikzpicture}
+  \caption{Przepływ zapytania. Każdy etap może zakończyć się błędem.}
+\end{figure}
+
+\subsection{Architektura wykonywania zapytań}
+Adapter HTTP sprawdza parametry. Parser przekształca
+tekst w drzewo wyrażenia, a planista ustala szeregi, zakres odczytu
+oraz siatkę czasu wyników. Indeks wybiera kandydatów według etykiet.
+Metadane segmentów pozwalają pominąć pliki spoza zakresu.
+
+Zapytanie otrzymuje widok pamięci i segmentów osobno dla każdego szeregu,
+bez wspólnego punktu w czasie dla wszystkich szeregów. Odczyt może obejmować
+część równocześnie przetwarzanej paczki. Blokada pojedynczego szeregu jest
+zwalniana po skopiowaniu potrzebnych danych aktywnych i pobraniu uchwytów
+do bloków niezmiennych, przed odczytem dyskowym i obliczeniami.
+Warstwa odczytu dostarcza próbki chronologicznie, łącząc źródła bez
+podwójnego zwracania punktów podczas zrzutu na dysk.
+
+% Odczyty plików i obliczenia działają w ograniczonej puli pracowników,
+% poza zadaniami obsługi sieci. Wykonawca przesuwa okno czasowe po próbkach
+% i oblicza wyniki kolejnych chwil bez ponownego czytania całej historii.
+% Selektor, agregacja i serializacja są oddzielnymi etapami tego samego
+% wykonania; plan nie wymaga osobnego zadania dla każdej próbki.
+
+Rozłączenie klienta sygnalizuje anulowanie wykonania. Pracownicy
+sprawdzają je między porcjami odczytu i obliczeń, a następnie zwalniają
+zasoby zapytania.
+
+\subsection{Interfejs HTTP}
+HTTP/1.1, UTF-8 i JSON. Zapytania także przez formularz POST.
+Wartości wyników są napisami, czasy wyników sekundami Unix.
+Zapis przyjmuje milisekundy i skończone f64.
+\par
+\begin{tabularx}{\linewidth}{P{68mm}Y}
+  \toprule
+  Interfejs                                                            & Główny kontrakt                         \\ \midrule
+  POST \code{/api/v1/write_json}                                       & Jeden pomiar albo \code{points},
+  niezależne wyniki punktów.                                                                                     \\
+  GET/POST \code{/api/v1/query}                                        & query, opcjonalny time, wynik chwilowy. \\
+  GET/POST \code{/api/v1/query_range}                                  & query, start, end, dodatni step,
+  macierz wyników na siatce czasu.                                                                               \\
+  GET \code{/api/v1/labels}, \code{/api/v1/label/<name>/values}        &
+  Nazwy/wartości etykiet z całego katalogu.                                                                      \\
+  GET \code{/api/v1/status/buildinfo}, \code{/healthz}, \code{/readyz} &
+  Wersja TSDB, zdrowie i gotowość po recovery.                                                                   \\
+  \bottomrule
+\end{tabularx}
+\begin{lstlisting}
+POST /api/v1/write_json
+{"metric":"temperature_celsius","labels":{"service":"api"},
+ "timestamp":1792843200000,"value":24.5}
+\end{lstlisting}
+Wynik zapisu: inserted, duplicates, rejected, errors.
+Zapytania stosują kopertę Prometheusa i vector/matrix/scalar.
+Błędy całego żądania: 400 składnia/koperta,
+422 wykonanie zapytania, 503 przeciążenie/gotowość/timeout.
+Konflikty i odrzucenia pomiarów są elementami listy errors.
+Timeout nie wycofuje zapisu.
+
+\subsection{Wynik zapisu częściowego}
+Błędny JSON, niepoprawna koperta, zbyt duże żądanie lub brak gotowości
+stwierdzony przed rozpoczęciem przetwarzania odrzuca żądanie bez zapisu.
+Po dekodowaniu błędy poszczególnych pomiarów dotyczą tylko tych punktów.
+Konflikt wartości, zamknięty zakres, przekroczone okno opóźnienia albo
+brak zasobów nie wycofują wcześniej przyjętych punktów.
+
+Zakończone przetwarzanie zwraca HTTP 200 z licznikami \code{inserted},
+\code{duplicates}, \code{rejected} i listą \code{errors}. Każdy błąd wskazuje
+\code{point_index}, liczony od zera w oryginalnym wejściu, i \code{reason}.
+Sukces obsługi żądania nie oznacza przyjęcia wszystkich pomiarów. Również
+całkowite odrzucenie punktów jest rozpoznawane po licznikach.
+Po pełnym przetworzeniu suma trzech liczników równa się liczbie punktów.
+
+Tryb \code{written} potwierdza przekazanie do systemu operacyjnego
+wszystkich przyjętych punktów tej odpowiedzi, także przy częściowych
+odrzuceniach. Nie tworzy transakcji i nie utrzymuje blokad szeregów.
+Ponowiony duplikat w otwartym buforze wymaga potwierdzenia jego
+wcześniejszego zapisu, jeśli klient wybrał ten tryb.
+
+Timeout, rozłączenie lub awaria w trakcie obsługi może pozostawić
+częściowy, nieznany klientowi wynik. Błąd całego żądania nie dowodzi
+wtedy braku zapisów. Ponowienie może dać duplikaty albo odrzucenia
+zamkniętych zakresów. Nie gwarantuje się bezterminowej idempotencji.
+
+\section{Technologie, wdrożenie i interfejs użytkownika}
+\label{sec:technology}
+\label{sec:network}
+\par
+\begin{tabularx}{\linewidth}{P{65mm}Y}
+  \toprule
+  Technologia                   & Uzasadnienie                                          \\ \midrule
+  Rust jako język programowania & Ergonomia, bezpieczeństwo pamięci i kontrola zasobów. \\
+  Axum, Tokio                   & Obsługa HTTP i współbieżnych żądań.                   \\
+  Serde, serde\_json            & Serializacja i odczyt danych JSON.                    \\
+  thiserror, tracing            & Obsługa błędów i diagnostyka.                         \\
+  Grafana                       & Wizualizacja danych i zapytań.                        \\
+  Docker Compose, Linux         & Powtarzalne wdrożenie na jednym hoście.               \\
+  \bottomrule
+\end{tabularx}
+
+Wersje utrwala Cargo.lock, obraz Grafany jest przypięty.
+Platforma docelowa: Linux x86-64 i lokalny system plików.
+LOCK dopuszcza jeden proces na katalog. Usługi tsdb i grafana
+korzystają z sieci tsdb-net i wolumenu tsdb-data.
+Grafana odpytuje \code{http://tsdb:8080}. Przeglądarka korzysta
+z portu 3000. API na porcie 8080 i Grafana są publikowane na loopback.
+Baza działa bez uprawnień administratora. Profil dostępu opisano poniżej.
+
+\subsection{Uwierzytelnianie i zakres dostępu}
+Profil podstawowy obejmuje jeden zaufany host: API jest dostępne na
+loopback lub w wydzielonej sieci kontenerów. Silnik nie ma własnego
+systemu kont, haseł ani uprawnień do poszczególnych szeregów.
+Logowanie do Grafany chroni jej interfejs. Nie zabezpiecza samodzielnie
+bezpośredniego dostępu do API bazy.
+
+Dostęp spoza zaufanego hosta wymaga osobnego profilu wdrożenia:
+reverse proxy przed API zapewnia HTTPS i uwierzytelnianie, a port silnika
+jest niedostępny bezpośrednio. Proponowany wariant minimalny to
+Basic Auth przez TLS, obsługiwany przez gotowe proxy, np. Nginx.
+Grafana potrafi przekazać dane Basic Auth
+i zweryfikować certyfikat serwera.
+Hasła i klucz prywatny są dostarczane jako sekrety poza repozytorium,
+a certyfikat serwera musi być zaufany przez klientów.
+
+Jest to opcjonalne rozszerzenie konfiguracji wdrożenia, do zatwierdzenia
+przed udostępnieniem zdalnym. Własne zarządzanie użytkownikami,
+role oraz certyfikaty klienckie pozostają poza zakresem pierwszej wersji.
+Nie zakłada się, że samo dodanie hasła do Grafany zastępuje tę warstwę.
+
+\subsection{Przykładowa konfiguracja i budżety}
+Konfiguracja CLI jest wczytywana przy starcie. Compose przekazuje ją
+w command. Wartości domyślne:
+\par
+\begin{tabularx}{\linewidth}{P{48mm}Y}
+  \toprule
+  Obszar          & Wartości domyślne                                   \\ \midrule
+  Head i katalog  & 512 MiB active/frozen/Arc, metadata 64 MiB,
+  10\,000 Series, buforowanie 30 min, out-of-order 5 min.               \\
+  WAL i przyjęcie & 32 MiB na dwa bufory dziennika,
+  64 MiB na ciała żądań, paczki i kodowanie,
+  8 przyjętych zapisów, 4 workers.                                      \\
+  Paczka          & Do 10\,000 punktów, ciało 4 MiB, wpis WAL do 8 MiB. \\
+  \bottomrule
+\end{tabularx}
+\par
+Pamięć zamrożonych bloków jest rozliczana do zwolnienia ostatniego
+odczytu, także po publikacji segmentu. Zapas pojemności i zmiany
+rozmiaru buforów podlegają budżetom.
+Limity head nie są limitem RSS całego procesu.
+Logi obejmują identyfikator żądania, wynik, czas, tryb potwierdzenia,
+ilość oczekujących danych, zrzuty na dysk i raport odzyskiwania.
+
+\subsection{Interfejs graficzny}
+\label{sec:ui}
+Interfejsem graficznym systemu będzie Grafana, dostępna z poziomu
+przeglądarki. Użytkownik będzie mógł przeglądać pomiary na wykresach,
+wybierać interesujące go szeregi i zakres czasu oraz porównywać dane
+z wynikami agregacji, takimi jak średnia, minimum i maksimum.
+Wykresy pozwolą obserwować trendy i zmiany wartości w czasie.
+Grafana będzie pobierać dane przez API bazy, a dashboardy umożliwią
+zestawienie kilku widoków danych na jednym ekranie.
+
+% \section{Weryfikacja, ryzyka i podział pracy}
+% \label{sec:verification}
+% Testy obejmą częściowy zapis, liczniki błędów i kanonizację (FR-01/02),
+% Written/recovery (FR-03), semantykę zapytań/funkcji (FR-04--06),
+% Grafanę (FR-07), flush i out-of-order (FR-08/09).
+% Wymuszone przeploty sprawdzą krótkie blokady jednego szeregu,
+% widoczność części paczki, poprawność widoków szeregów,
+% ponowne definicje szeregów, granice checkpointów i usuwanie dziennika.
+% Awarie w Written (co najmniej 20 prób z dziennikiem klienta)
+% obejmą zapis dziennika, checkpoint, manifest i usuwanie plików.
+
+% \par
+% \begin{tabularx}{\linewidth}{P{47mm}Y}
+%   \toprule
+%   Cel z lab1                                                            & Profil pomiaru                                         \\ \midrule
+%   p95: zapis 100 ms, paczka 500 ms; odczyt 200 ms, agregacja RAM 500 ms &
+%   HTTP z kolejką i Written; paczka 1000 punktów, odczyt 1000 wyników.                                                            \\
+%   Co najmniej 10\,000 punktów/s                                         & 1000 Series, paczki po 1000, 4 klientów,
+%   Written, godzina z flush.                                                                                                      \\
+%   RSS do 1 GiB                                                          & 10\,000 punktów/s, 30 min buforowania, minimum 65 min,
+%   także podczas flush i z dwoma zapytaniami.                                                                                     \\
+%   Recovery do 10 s                                                      & Milion potwierdzonych punktów, osobno WAL/segmenty
+%   oraz zimny/ciepły cache.                                                                                                       \\
+%   \bottomrule
+% \end{tabularx}
+
+% Referencja: Linux, co najmniej 4 rdzenie, 8 GiB RAM, lokalny SSD,
+% build release. Raport podaje sprzęt, konfigurację i commit;
+% None mierzy się oddzielnie od trwałej przepustowości.
+% Główne ryzyka to pauza podczas zamykania dziennika, pamięć odczytu i zrzutu, koszt
+% out-of-order, wzrost plików bez retencji i zgodność Grafany.
+% Ocenia się p95, RSS, oczekujące dane, czasy checkpointów i liczbę odrzuceń;
+% cele wymagają pomiarów.
+
+% Jan Zaborski odpowiada za WAL, segmenty, checkpoint i recovery.
+% Hubert Błonowski za parser, zapytania, HTTP i Grafanę.
+% Model danych, kontrakty, testy integracyjne i pomiary są wspólne.
+% Wersja pełna zawiera scenariusze T-01--20,
+% profile P-01--06, formaty bajtowe i komplet ustawień.
+
+% \begingroup
+% \small
+% \begin{thebibliography}{10}
+%   \raggedright
+%   \setlength{\itemsep}{0pt}
+%   \addcontentsline{toc}{section}{Źródła}
+%   \bibitem{lab1} H. Błonowski, J. Zaborski,
+%   \emph{Specyfikacja wymagań i zakres pracy}, lab1, wersja 1.1, 21.10.2026.
+%   \bibitem{prom-api} Prometheus, \emph{HTTP API}.
+%   \url{https://prometheus.io/docs/prometheus/latest/querying/api/}.
+%   \bibitem{grafana-provision} Grafana Labs, \emph{Provision Grafana}.
+%   \url{https://grafana.com/docs/grafana/latest/administration/provisioning/}.
+%   \bibitem{linux-sync} Linux man-pages, \emph{fsync(2), fdatasync(2)}.
+%   \url{https://man7.org/linux/man-pages/man2/fsync.2.html}.
+%   \bibitem{linux-cache} Linux Kernel, \emph{Concepts overview: Page cache}.
+%   \url{https://docs.kernel.org/admin-guide/mm/concepts.html#page-cache}.
+%   \bibitem{linux-mmap} Linux man-pages, \emph{mmap(2)}.
+%   \url{https://man7.org/linux/man-pages/man2/mmap.2.html}.
+%   \bibitem{nginx-auth} Nginx, \emph{HTTP Basic Authentication module}.
+%   \url{https://nginx.org/en/docs/http/ngx_http_auth_basic_module.html}.
+%   \bibitem{nginx-tls} Nginx, \emph{Configuring HTTPS servers}.
+%   \url{https://nginx.org/en/docs/http/configuring_https_servers.html}.
+%   \bibitem{grafana-source} Grafana Labs, \emph{Configure the Prometheus data source}.
+%   \url{https://grafana.com/docs/grafana/latest/datasources/prometheus/configure/}.
+% \end{thebibliography}
+% \endgroup
+\end{document}
