@@ -7,7 +7,7 @@
 \usepackage{array,longtable,booktabs,tabularx}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx,xcolor,tikz,listings}
-\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,shapes.geometric}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,shapes.geometric,shapes.multipart}
 \usepackage[hidelinks,unicode]{hyperref}
 \usepackage{xurl}
 \usepackage{bookmark}
@@ -23,6 +23,7 @@
 \setlength{\emergencystretch}{2em}
 \setlength{\parskip}{0.35em}
 \setlength{\parindent}{0pt}
+\setcounter{tocdepth}{1}
 \setlist{itemsep=0.15em,topsep=0.3em}
 \renewcommand{\arraystretch}{1.18}
 \setlength{\tabcolsep}{2.8pt}
@@ -45,7 +46,15 @@
   external/.style={box,fill=white,draw=black!60},
   arrow/.style={-{Latex[length=2mm]},thick,draw=accent},
   note/.style={font=\scriptsize,align=center,fill=white,inner sep=2pt},
-  state/.style={box,text width=28mm,minimum height=10mm}
+  state/.style={box,text width=28mm,minimum height=10mm},
+  umlclass/.style={draw=accent,fill=pale,rectangle split,
+    rectangle split parts=3,rectangle split part align={left,left,left},
+    align=left,font=\scriptsize,
+    inner sep=5pt,text width=43mm},
+  assoc/.style={thick,draw=accent},
+  compose/.style={{Diamond[fill=accent,length=2mm]}-,thick,draw=accent},
+  usecase/.style={ellipse,draw=accent,fill=pale,align=center,
+    font=\small,text width=36mm,minimum height=13mm}
 }
 
 \begin{document}
@@ -67,8 +76,8 @@ szeregów czasowych\\w języku Rust\par}
 Autorzy: & Hubert Błonowski\\
          & Jan Zaborski\\[0.5em]
 Promotor: & mgr inż. Paweł Sobótka\\[0.5em]
-Wersja dokumentu: & 1.2\\
-Data: & 24 października 2026 r.
+Wersja dokumentu: & 1.3\\
+Data: & 2 listopada 2026 r.
 \end{tabular}
 \vfill
 \url{https://github.com/janzaborski/rust-tsdb}
@@ -79,41 +88,38 @@ Data: & 24 października 2026 r.
 
 \section*{Streszczenie}
 \addcontentsline{toc}{section}{Streszczenie}
-Dokument przedstawia projekt jednowęzłowej bazy danych szeregów czasowych
-napisanej w języku Rust. Określa podział systemu na moduły, model danych,
-komunikację przez HTTP, podzbiór języka PromQL oraz integrację z Grafaną.
-Szczegółowo opisuje buforowanie pomiarów, dziennik wyprzedzający zapis
-(WAL), format niezmiennych segmentów, indeksowanie i odzyskiwanie po awarii
-procesu. Jedna struktura TSMap udostępnia szeregi TS z osobnymi blokadami.
-Rotacja bloków pozwala kontynuować zapis podczas zrzutu na dysk.
-Buforowany WAL jest obsługiwany przez flusher i syncer; każde żądanie
-wybiera poziom trwałości None, Written albo Synced.
-Definiuje kontrakty, na podstawie których można niezależnie
-implementować silnik przechowywania, obsługę zapytań i warstwę HTTP.
-
-Jest to \textbf{specyfikacja architektury docelowej}, a nie opis stanu
-repozytorium. Zaprojektowane mechanizmy i podane wartości wydajnościowe
-wymagają weryfikacji podczas implementacji. Dokument z laboratorium 1
-stanowi punkt wyjścia; doprecyzowania jego wymagań wskazano jawnie.
+Projekt jednowęzłowej TSDB w Rust obejmuje moduły, model danych,
+HTTP, podzbiór PromQL i Grafanę. Jedna TSMap z osobnymi blokadami TS
+pozwala współbieżnie zapisywać, a rotacja bloków zachowuje dostępność
+podczas flush. Buforowany WAL, flusher i syncer realizują tryby None,
+Written i Synced. Kontrakty, formaty, indeksy i recovery umożliwiają
+niezależną implementację magazynu, zapytań i HTTP.
+To \textbf{specyfikacja docelowa}, nie opis prototypu ani wyniki pomiarów.
+Punktem wyjścia jest lab1; doprecyzowania wymagań wskazano jawnie.
 
 \section*{Historia zmian}
 \addcontentsline{toc}{section}{Historia zmian}
 \begin{tabularx}{\linewidth}{P{14mm}P{22mm}P{42mm}Y}
 \toprule
 Wersja & Data & Autorzy & Zakres zmiany\\ \midrule
-1.0 & 24.10.2026 & Hubert Błonowski,\newline Jan Zaborski &
-Projekt architektury, kontrakty modułów i API, formaty plików,
-diagramy, wizja interfejsu oraz plan weryfikacji.\\
-1.1 & 24.10.2026 & Hubert Błonowski,\newline Jan Zaborski &
-TSMap i TS inspirowane Gorilla, współbieżne zapisy bez shardów,
-rotacja bloków i WAL, flush w tle oraz uaktualnione recovery i testy.\\
-1.2 & 24.10.2026 & Hubert Błonowski,\newline Jan Zaborski &
-Buforowany WAL, flusher i syncer, bajtowy LSN, poziomy trwałości,
-niezależna rotacja plików oraz dostosowane API, checkpoint i recovery.\\
+1.0 & 24.10.2026 & H. Błonowski,\newline J. Zaborski &
+Architektura, API, formaty, diagramy, GUI i plan weryfikacji.\\
+1.1 & 24.10.2026 & H. Błonowski,\newline J. Zaborski &
+TSMap/TS, współbieżność bez shardów, rotacja bloków i flush w tle.\\
+1.2 & 24.10.2026 & H. Błonowski,\newline J. Zaborski &
+Buforowany WAL, bajtowy LSN, poziomy trwałości, checkpoint i recovery.\\
+1.3 & 02.11.2026 & H. Błonowski,\newline J. Zaborski &
+Krótszy opis; UML przypadków użycia, klas, wdrożenia i stanów.\\
 \bottomrule
 \end{tabularx}
+\par
 \begingroup
 \footnotesize
+\setlength{\parskip}{0pt}
+\makeatletter
+\renewcommand*\l@section[2]{%
+  \@dottedtocline{1}{0em}{1.8em}{\bfseries #1}{#2}}
+\makeatother
 \tableofcontents
 \endgroup
 \clearpage
@@ -122,126 +128,154 @@ niezależna rotacja plików oraz dostosowane API, checkpoint i recovery.\\
 \section{Cel, zakres i decyzje architektoniczne}
 \label{sec:scope}
 
-\subsection{Cel projektu i odbiorcy dokumentu}
-System ma przyjmować pomiary przesyłane przez aplikacje, trwale
-przechowywać je we własnym silniku oraz udostępniać historyczne dane
-i agregacje czasowe. Użytkownik analizuje wyniki w Grafanie. Głównym
-problemem inżynierskim jest pogodzenie trwałości potwierdzonych zapisów,
-ograniczonej pamięci i odczytu danych rozdzielonych między RAM a dysk.
+\subsection{Cel, odbiorcy i granice systemu}
+Baza przyjmuje pomiary aplikacji, przechowuje je we własnym silniku
+i udostępnia historię oraz agregacje w Grafanie. Projekt dla autorów,
+promotora i recenzenta określa zachowanie docelowe; przykłady i cele
+wydajnościowe nie są wynikami prototypu.
 
-Dokument jest przeznaczony dla autorów implementacji, promotora
-i osoby weryfikującej projekt. Normatywne sformułowania opisują zachowanie,
-które implementacja ma osiągnąć. Przykłady przedstawiają projektowane
-kontrakty; nie stanowią wyników uruchomienia obecnego prototypu.
-
-\subsection{Granice systemu}
-Zakres obejmuje własny silnik, serwer HTTP, dokładne dopasowanie etykiet,
-pięć agregacji w czasie i demonstrację w Docker Compose. Proces bazy
-przechowuje dane na lokalnym systemie plików. Grafana oraz generatory są
-zewnętrznymi klientami, a nie częściami silnika.
-
-W tej wersji nie projektuje się replikacji, klastra, kompresji, automatycznej
-retencji, kompaktowania segmentów, alertowania, skanowania źródeł
-\code{/metrics} ani osobnego frontendu. Katalog danych rośnie do chwili
-usunięcia całego środowiska przez operatora. Operacyjna kopia zapasowa
-wymaga zatrzymania procesu i skopiowania całego katalogu.
+Zakres: jednowęzłowy silnik Rust, HTTP, dokładne dopasowanie etykiet,
+pięć agregacji czasowych i demonstracja w Compose. Grafana i generatory
+są klientami zewnętrznymi. Poza zakresem pozostają klaster, replikacja,
+kompresja, retencja, kompaktowanie, alertowanie, pobieranie
+\code{/metrics} i własny frontend. Dane rosną do usunięcia środowiska;
+kopia zapasowa wymaga zatrzymania bazy i skopiowania całego katalogu.
 
 \subsection{Doprecyzowania względem laboratorium 1}
-\begin{longtable}{P{23mm}P{53mm}P{80mm}}
-\tabhead{Wymaganie & Przyjęta interpretacja & Konsekwencja projektowa}
-FR-01 & Paczka jest jednostką atomowego zapisu. &
-Niepoprawny punkt odrzuca całą paczkę. Błąd transportu po utrwaleniu
-nie oznacza wycofania operacji.\\
-FR-03 & Widoczność w head i wybrany poziom trwałości. &
-Domyślne Written zapewnia zapis całej ramki do systemu operacyjnego
-przed odpowiedzią. Synced wymaga synchronizacji nośnika.
-Jawnie wybrane None dopuszcza utratę potwierdzonych danych po awarii procesu.\\
-FR-04 & Zapytanie zakresowe wielokrotnie oblicza wyrażenie. &
-Sam selektor wybiera ostatnią próbkę; nie wykonuje automatycznej agregacji.
-Agregację wskazuje funkcja w wyrażeniu.\\
-FR-08 & Czas buforowania jest liczony od przyjęcia najstarszej próbki
-w bieżącej generacji. &
-Zrzut obejmuje całą generację; młodsze próbki mogą opuścić RAM wcześniej.
-Limit pamięci może wymusić wcześniejszy zrzut.\\
-FR-09 & Out-of-order dotyczy wyłącznie otwartego bufora. &
-Przyjęcie wymaga zarówno zachowania okna opóźnienia, jak i przekroczenia
-granicy zamknięcia szeregu. Samo zmieszczenie się w oknie nie wystarcza.\\
-NFR-03 & Jednostki pamięci są bajtowe. &
-Cel wynosi RSS $\leq 1$ GiB, a nie 1 Gb. Około 288 MB to surowe próbki,
-bez pojemności zapasowej kontenerów, indeksów i obsługi zapytań.\\
-NFR-04 & Gwarancja obejmuje awarię procesu przy poprawnie działającym
-systemie operacyjnym i nośniku. &
-Kryterium braku utraty dotyczy Written i Synced; None jest mierzone
-oddzielnie. Błąd I/O w obsłudze WAL kończy proces, a nie daje sukcesu
-oczekującym klientom. Uszkodzenie nośnika jest poza gwarancją.\\
+\begin{longtable}{P{23mm}P{133mm}}
+\tabhead{Wymaganie & Przyjęta interpretacja i konsekwencja}
+FR-01 & Atomowa paczka: błędny punkt odrzuca całość; utrata odpowiedzi
+po zapisie nie wycofuje danych.\\
+FR-03 & Widoczność head poprzedza odpowiedź. Domyślne Written oznacza
+zapis ramki do systemu operacyjnego, Synced także synchronizację,
+a jawne None dopuszcza utratę po awarii procesu.\\
+FR-04 & Zakres to obliczenia na siatce czasu. Selektor wybiera ostatnią
+próbkę; agregacja wymaga funkcji.\\
+FR-08 & Czas buforowania biegnie od przyjęcia najstarszej próbki
+generacji. Flush całej generacji może wcześniej usunąć młodsze dane
+z RAM; limit pamięci może go przyspieszyć.\\
+FR-09 & Out-of-order wyłącznie w otwartym buforze: obowiązują
+jednocześnie okno opóźnienia i granica zamknięcia.\\
+NFR-03 & RSS $\leq1$ GiB (nie Gb); 288 MB surowych próbek nie obejmuje
+zapasowej pojemności, indeksów ani zapytań.\\
+NFR-04 & Brak utraty przy awarii procesu dotyczy Written/Synced,
+przy sprawnym OS i nośniku. None mierzy się osobno; błąd I/O WAL
+kończy proces. Fizyczne uszkodzenie nośnika jest poza gwarancją.\\
 \end{longtable}
 
 \subsection{Rejestr głównych decyzji}
-\begin{longtable}{P{13mm}P{51mm}P{92mm}}
-\tabhead{ID & Decyzja & Uzasadnienie i koszt}
-DA-01 & Modularny monolit w Rust. &
-Brak komunikacji sieciowej wewnątrz silnika; prostsze transakcje i diagnostyka.
-Skalowanie ograniczone do jednego węzła.\\
-DA-02 & Jedna TSMap i synchronizacja każdego TS. &
-Wiele operacji zapisu może równolegle zmieniać rozłączne szeregi.
-Katalog ma krótkie sekcje krytyczne; projekt nie wymaga shardów.\\
-DA-03 & Aktywne i zamrożone bloki bez kompresji. &
-Uporządkowane wektory obsługują out-of-order, a niezmienne bloki
-pozostają dostępne podczas zapisu na dysk.\\
-DA-04 & Wspólne generacje, flush w tle. &
-Krótka bariera zamraża head i ustala granicę checkpointu.
-Zapis segmentu nie zatrzymuje nowych zapisów; trwa najwyżej jeden flush.\\
-DA-05 & Grafana jako jedyny interfejs graficzny. &
-Wykorzystanie standardowego źródła Prometheus; konieczne testy
-zgodności z ustaloną wersją Grafany.\\
-DA-06 & Brak modyfikacji zamkniętych zakresów. &
-Proste indeksy i niepokrywające się przedziały segmentów danego szeregu.
-Starszy punkt może zostać odrzucony po wcześniejszym zrzucie.\\
-DA-07 & Jeden logiczny WAL z rotowanymi plikami. &
-Żądania dopisują do bufora RAM. Flusher zapisuje pliki, syncer
-synchronizuje je. Oczekiwanie na trwałość jest poza blokadami TS.\\
-DA-08 & Atomowe paczki i spójny widok wybranych szeregów. &
-Blokady TS są pobierane w kolejności identyfikatorów. Duża paczka
-lub zapytanie może chwilowo ograniczyć równoległość.\\
-DA-09 & Written jako domyślny poziom trwałości. &
-None i Synced są wybierane per żądanie. Widoczność danych jest
-oddzielona od zapisu do systemu operacyjnego i synchronizacji.\\
+\begin{longtable}{P{13mm}P{143mm}}
+\tabhead{ID & Decyzja, uzasadnienie i koszt}
+DA-01 & Modularny monolit Rust: wywołania wewnątrz procesu upraszczają
+transakcje i diagnostykę; skalowanie do jednego węzła.\\
+DA-02 & Jedna TSMap, osobna blokada każdego TS: równoległe zapisy
+rozłącznych szeregów, krótkie blokady katalogu, bez shardów.\\
+DA-03 & Posortowane, niekompresowane bloki aktywne i zamrożone:
+out-of-order i dostępność odczytu podczas flush.\\
+DA-04 & Wspólne generacje head: krótka bariera wyznacza checkpoint;
+jeden flush w tle pozwala dalej zapisywać.\\
+DA-05 & Grafana jako jedyne GUI: standardowe źródło Prometheus,
+zgodność sprawdzana z przypiętą wersją.\\
+DA-06 & Zamknięte zakresy są niezmienne: proste indeksy i rozłączne
+bloki szeregu; wcześniejszy flush może spowodować odrzucenie punktu.\\
+DA-07 & Jeden buforowany WAL, flusher i syncer: rotowane pliki;
+oczekiwanie na I/O poza blokadami TS.\\
+DA-08 & Atomowa paczka i spójny widok wybranych TS: blokady rosnąco po ID;
+duża operacja może ograniczyć równoległość.\\
+DA-09 & Written domyślnie, None/Synced per żądanie:
+widoczność i trwałość są odrębnymi właściwościami.\\
 \end{longtable}
 
 \section{Architektura systemu}
 \label{sec:architecture}
 
-\subsection{Kontekst i topologia wdrożenia}
-System działa na jednym komputerze. Przeglądarka komunikuje się z Grafaną;
-to serwer Grafany wysyła zapytania do bazy. Generatory dostarczają pomiary
-przez własne API zapisu HTTP JSON. W środowisku nie działa serwer Prometheus.
+\subsection{Przypadki użycia i aktorzy}
+Producent wysyła pojedyncze pomiary lub atomowe paczki. Analityk
+wybiera czas i serwis w Grafanie albo odpytuje API. Operator uruchamia,
+konfiguruje i restartuje bazę oraz kontroluje jej stan.
 
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}
-\node[external] (user) at (0,0) {Użytkownik\\przeglądarka};
-\node[box] (grafana) at (5,0) {Grafana\\port 3000};
-\node[external] (gen) at (0,-2.7) {Generatory\\telemetrii};
-\node[box] (db) at (5,-2.7) {TSDB / Rust\\HTTP :8080};
-\node[external] (disk) at (10,-2.7) {Wolumen\\\code{/var/lib/tsdb}};
-\draw[arrow] (user) -- node[note,above]{HTTP\\localhost:3000} (grafana);
-\draw[arrow] (grafana) -- node[note,right]{HTTP / JSON\\zapytania} (db);
-\draw[arrow] (gen) -- node[note,above]{HTTP / JSON\\paczki pomiarów} (db);
-\draw[arrow] (db) -- node[note,above]{lokalne I/O} (disk);
-\begin{scope}[on background layer]
-\node[draw=black!40,dashed,rounded corners,fit=(grafana)(gen)(db),
-  inner sep=7mm,label={[font=\small]below:sieć Compose: tsdb-net}] {};
-\end{scope}
+\draw[draw=accent,rounded corners] (0.6,0.6) rectangle (11,-6.3);
+\node[font=\small\bfseries,anchor=north] at (5.8,0.5)
+  {TSDB z interfejsem Grafany};
+\foreach \x/\y/\id/\name in {-1/-.9/prod/Producent,-1/-4.2/anal/Analityk,
+  12.4/-2.6/ops/Operator} {
+  \coordinate (\id) at (\x,\y);
+  \draw[thick] (\x,\y+.6) circle (.15);
+  \draw[thick] (\x,\y+.45) -- (\x,\y-.12)
+    (\x-.33,\y+.25) -- (\x+.33,\y+.25)
+    (\x,\y-.12) -- (\x-.28,\y-.5)
+    (\x,\y-.12) -- (\x+.28,\y-.5);
+  \node[font=\small,below] at (\x,\y-.55) {\name};
+}
+\node[usecase] (ingest) at (3.6,-1.2) {Zapis pomiarów\\FR-01, 02, 03, 09};
+\node[usecase] (query) at (3.6,-3.4) {Zapytanie chwilowe\\lub zakresowe\\FR-04, 05, 06};
+\node[usecase] (dash) at (3.6,-5.4) {Analiza dashboardu\\FR-07};
+\node[usecase,text width=28mm] (run) at (8.6,-1.5)
+  {Konfiguracja, start\\i restart bazy};
+\node[usecase,text width=28mm] (status) at (8.6,-4)
+  {Kontrola zdrowia\\i gotowości};
+\draw[assoc] (prod) -- (ingest);
+\draw[assoc] (anal) -- (query);
+\draw[assoc] (anal) -- (dash);
+\draw[assoc] (ops) -- (run);
+\draw[assoc] (ops) -- (status);
 \end{tikzpicture}
-\caption{Kontekst i kontenery środowiska demonstracyjnego. Wolumen jest zasobem hosta.}
+\caption{Diagram przypadków użycia UML. Flush (FR-08) jest automatycznym
+mechanizmem silnika, a nie osobnym działaniem użytkownika.}
+\label{fig:usecases}
+\end{figure}
+
+\subsection{Wdrożenie i granice procesów}
+System działa na jednym komputerze. Przeglądarka łączy się z Grafaną;
+serwer Grafany odpytuje TSDB, a generator wysyła HTTP JSON.
+W środowisku nie ma serwera Prometheus.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\small]
+\draw[draw=accent,thick,fill=black!1] (0,0) rectangle (14,-9.1);
+\node[anchor=north west,align=left] at (.2,-.15)
+  {\textit{<<device>>} Host Linux x86-64};
+\node[external,text width=40mm] (browser) at (3,-1.45)
+  {Przeglądarka\\Grafana UI};
+\node[external,text width=40mm] (curl) at (10,-1.45)
+  {Klient testowy\\HTTP / curl};
+\draw[draw=black!50,dashed] (.5,-2.8) rectangle (13.5,-6.9);
+\node[anchor=north,font=\scriptsize,align=center] at (7,-2.95)
+  {\textit{<<executionEnvironment>>}\\Docker Compose, sieć tsdb-net};
+\node[box,text width=38mm] (grafana) at (3,-4.4)
+  {\textit{<<container>>}\\grafana :3000};
+\node[box,text width=42mm] (db) at (10,-4.4)
+  {\textit{<<container>>}\\tsdb / Rust :8080};
+\node[box,text width=38mm] (gen) at (3,-6.1)
+  {\textit{<<container>>}\\generator};
+\node[external,text width=42mm] (config) at (3,-8.2)
+  {\textit{<<artifact>>}\\YAML źródła + JSON dashboardu};
+\node[external,text width=42mm] (data) at (10,-8.2)
+  {Wolumen tsdb-data\\\code{/var/lib/tsdb}};
+\draw[assoc] (browser) -- node[note,right]{HTTP\\127.0.0.1:3000} (grafana);
+\draw[assoc] (curl) -- node[note,right]{HTTP\\127.0.0.1:8080} (db);
+\draw[assoc] (grafana) -- node[note,above]{HTTP / JSON\\http://tsdb:8080} (db);
+\draw[assoc] (gen.east) -- node[note,above]{HTTP JSON: POST /api/v1/write}
+  (10,-6.1) -- (db.south);
+\draw[assoc] (db.south east) -- (11.2,-5.4) --
+  node[note,right]{lokalne I/O} (11.2,-7.5) -- (data.north east);
+\draw[assoc] (config.west) -- (.7,-8.2) |-
+  node[note,pos=.6,left]{mount\\read-only} (grafana.west);
+\end{tikzpicture}
+\caption{Diagram wdrożenia UML z zasobami lokalnymi.
+Porty hosta są publikowane wyłącznie na loopback; kontenery używają DNS tsdb.
+Szczegóły dostępu określa sekcja~\ref{sec:network}.}
 \label{fig:deployment}
 \end{figure}
 
-Proces bazy ma wyłączny dostęp do katalogu danych. Blokada systemowa pliku
-\code{LOCK}, utrzymywana przez otwarty deskryptor, uniemożliwia uruchomienie
-drugiego procesu na tym samym katalogu. Istnienie samego pliku po awarii
-nie oznacza aktywnej blokady. Systemy plików sieciowych nie są platformą
-docelową.
+Jeden proces ma wyłączny dostęp do katalogu: systemowa blokada pliku
+\code{LOCK} trwa tak długo jak jego otwarty deskryptor; pozostały po
+awarii plik nie oznacza aktywnej blokady. Sieciowe systemy plików
+nie są platformą docelową.
 
 \subsection{Warstwy, moduły i zależności}
 Warstwa HTTP odpowiada za protokół, warstwa aplikacyjna za operacje
@@ -269,87 +303,69 @@ typów języka. Silnik nie zna kodów HTTP, Grafany ani składni PromQL.
 \caption{Zależności logiczne. Konfiguracja i diagnostyka są współdzielonymi usługami pomocniczymi.}
 \end{figure}
 
-\begin{longtable}{P{33mm}P{67mm}P{56mm}}
-\tabhead{Moduł & Odpowiedzialność & Interfejs i zależności}
-HTTP & Dekodowanie, limity żądań, mapowanie błędów i kodowanie odpowiedzi. &
-Wywołuje zapis lub wykonawcę zapytań; używa Axum i Serde.\\
-Model i walidacja & Kanonizacja klucza szeregu, sprawdzanie typów,
-limity etykiet i wartości. & Typy wspólne, bez zależności od HTTP i plików.\\
-Koordynator zapisu & Pula operacji, uporządkowane blokady TS,
-walidacja paczek i rezerwacja pamięci. & TSMap, TS, usługa WAL i bariera generacji.\\
-TSMap i indeks & Klucz $\leftrightarrow$ uchwyt TS, rejestracja szeregów
-i indeks etykiet. & Metadane pod krótką blokadą katalogu.\\
-TS i bloki & Posortowane próbki, duplikaty, granice czasu,
-blok aktywny i bloki zamrożone. & Osobna blokada każdego TS; pamięć rozliczana globalnie.\\
-WAL & Bufor RAM, bajtowy LSN, granice written/synced i rotacja plików. &
-Mutex bufora, flusher, syncer i kanały watch; bez blokad TS w zadaniach I/O.\\
-Magazyn segmentów & Zapis bloków, indeksy czasowe, manifest i checkpoint. &
-Lokalne pliki, sumy CRC, koordynator zrzutu.\\
-Parser & Tekst $\rightarrow$ AST lub błąd z pozycją. &
-Bez dostępu do danych; typy selektora, funkcji i czasu.\\
-Wykonawca zapytań & Dobór szeregów, plan odczytu, agregacje, limity pracy. &
-AST i interfejs odczytu; bez bezpośredniego dostępu do WAL.\\
+\begin{longtable}{P{33mm}P{123mm}}
+\tabhead{Moduł & Odpowiedzialność, interfejs i zależności}
+HTTP & Dekodowanie, limity, błędy i odpowiedzi; Axum/Serde,
+wywołania zapisu i zapytań.\\
+Model i walidacja & Wspólne typy, kanonizacja klucza, limity nazw/etykiet
+i wartości; bez HTTP i plików.\\
+Koordynator zapisu & Pula, kolejność blokad, walidacja/rezerwacja;
+TSMap, TS, WAL i bariera head.\\
+TSMap i indeks & Klucz $\leftrightarrow$ TS, rejestracja i indeks etykiet;
+metadane pod krótką blokadą katalogu.\\
+TS i bloki & Posortowane próbki, duplikaty, granice czasu, aktywny/zamrożony
+blok; blokada per TS, globalny budżet RAM.\\
+WAL & Bufor, bajtowy LSN, Written/Synced i rotacja;
+mutex, flusher/syncer, watch, bez blokad TS w I/O.\\
+Magazyn segmentów & Lokalne pliki, CRC, indeksy, manifest/checkpoint;
+koordynator flush.\\
+Parser & Tekst $\rightarrow$ AST/błąd z pozycją; typy języka,
+bez dostępu do danych.\\
+Wykonawca zapytań & Dobór TS, plan, agregacje i budżety;
+AST i interfejs odczytu, bez dostępu do WAL.\\
 Uruchomienie i diagnostyka & Konfiguracja, blokada katalogu, recovery,
-gotowość, logi i zakończenie. & Zarządza cyklem życia pozostałych modułów.\\
+gotowość, logi i zakończenie; zarządza cyklem życia modułów.\\
 \end{longtable}
-
 
 \subsection{Współbieżność i spójność}
 \label{sec:concurrency}
-Tokio obsługuje sieć, a ograniczona pula robocza wykonuje część
-pamięciową zapisu, domyślnie cztery zadania równolegle.
-Każdy TS ma własny \code{RwLock}. Rozłączne szeregi mogą być
-walidowane i aktualizowane równolegle. Jeden logiczny WAL porządkuje
-ramki podczas krótkiego dopisywania do bufora \code{Mutex<Vec<u8>>}.
+Tokio obsługuje sieć; ograniczona pula wykonuje pamięciową część zapisu
+(domyślnie cztery zadania). Osobne \code{RwLock} TS pozwalają równolegle
+zmieniać rozłączne szeregi. Wszystkie operacje przestrzegają poniższej
+kolejności; nie utrzymują blokady katalogu podczas pobierania blokad TS.
 
-\textbf{Kolejność blokad zapisu:} jeżeli potrzebne są nowe szeregi,
-najpierw mutex rejestracji, następnie współdzielona bariera generacji head,
-a potem wyłączne blokady TS paczki w rosnącej kolejności \code{SeriesId}.
-Odczytanie uchwytów z TSMap kończy się przed pobieraniem blokad TS.
-Pod tymi blokadami przeprowadza się walidację, rezerwuje alokacje,
-koduje ramkę, dopisuje ją do bufora WAL i aktualizuje head.
-Przed zwolnieniem którejkolwiek blokady publikuje się całą paczkę.
+\begin{longtable}{P{25mm}P{131mm}}
+\tabhead{Operacja & Blokady i punkt publikacji}
+Zapis & Dla nowych TS: mutex rejestracji; następnie współdzielona
+bariera generacji i wyłączne blokady TS rosnąco po ID.
+Walidacja i rezerwacja zasobów $\rightarrow$ kodowanie
+$\rightarrow$ enqueue WAL $\rightarrow$ publikacja całej paczki
+przed zwolnieniem którejkolwiek blokady TS.\\
+Enqueue & Mutex bufora obejmuje wyłącznie kopię kompletnej ramki
+i przydział LSN. Może wystąpić oczekiwanie na mutex lub budżet;
+brak I/O, aktualizacji head i oczekiwania na trwałość pod tym mutexem.
+Mechanizm nie jest lock-free.\\
+Trwałość & Po publikacji zwolnić blokady, barierę i miejsce w puli.
+HTTP czeka asynchronicznie przez watch; None odpowiada od razu.
+Flusher i syncer nie pobierają blokad TS ani bariery head
+(sekcja~\ref{sec:wal-runtime}).\\
+ReadView & Z TSMap pobrać uchwyty i wersję katalogu, zwolnić katalog,
+pobrać współdzielone blokady wszystkich wybranych TS rosnąco po ID
+(\code{try_read} z timeoutem). Zmiana atomowej wersji katalogu wymaga
+zwolnienia blokad i ponowienia wyboru. Skopiować potrzebne aktywne
+próbki i uchwyty niezmiennych bloków/segmentów; zwolnić blokady.\\
+Zamrożenie & Wyłączna bariera czeka na części enqueue--head append,
+ustala $C$ i zamraża bloki. Zwalnia barierę przed I/O.
+Nowe aktywne bloki przyjmują zapis podczas flush
+(sekcja~\ref{sec:checkpoint}); rotacja WAL jest niezależna.\\
+\end{longtable}
 
-Mutex bufora WAL chroni kopię kompletnej ramki i przydział jej LSN.
-Nie obejmuje aktualizacji head, operacji plikowych ani oczekiwania
-na trwałość. Dopisanie może czekać na mutex lub budżet pamięci,
-ale nie wykonuje I/O. Nie używa się terminu lock-free.
-
-Po publikacji zwalnia się blokady TS, mutex rejestracji, barierę
-oraz miejsce w puli roboczej. Dopiero wtedy obsługa HTTP asynchronicznie
-czeka na wybrany poziom Written lub Synced. None odpowiada bez tego
-oczekiwania. Zawieszone oczekiwanie nie zajmuje wątku roboczego ani
-blokad potrzebnych kolejnym zapisom i zamrażaniu head.
-
-Flusher zapisuje przejęte bufory do plików, a syncer wykonuje
-\code{fdatasync}. Nie pobierają blokad TS ani bariery head.
-Udostępniają przez kanały watch monotoniczne granice zapisu
-i synchronizacji. Szczegóły wyznacza sekcja~\ref{sec:wal-runtime}.
-
-\textbf{Odczyt spójnego widoku:} zapytanie wybiera z TSMap uchwyty
-i wersję katalogu, zwalnia blokadę mapy, następnie pobiera współdzielone
-blokady wszystkich wybranych TS w tej samej rosnącej kolejności.
-Sprawdza atomowy licznik wersji katalogu; jeśli w międzyczasie
-zarejestrowano szereg, zwalnia blokady i ponawia wybór w ramach timeoutu.
-Nie pobiera ponownie blokady TSMap, trzymając blokady TS.
-Kopiuje potrzebne aktywne próbki i uchwyty do niezmiennych bloków
-oraz segmentów, po czym zwalnia blokady. Oczekiwanie na blokady
-używa \code{try_read} z kontrolą timeoutu.
-
-Widok odpowiada jednej chwili stanu wybranych szeregów i nie zawiera
-części paczki. Całe zapytanie zakresowe korzysta z tego samego widoku.
-Może zobaczyć paczkę, której klient nadal oczekuje na Written lub Synced:
-\textbf{widoczność w head i trwałość są odrębnymi właściwościami}.
-Nie opisuje się widoku pojedynczym globalnym LSN, ponieważ rozłączne
-publikacje mogą kończyć się poza kolejnością WAL.
-Odczyt po odpowiedzi sukcesu widzi zapis w odpowiednim zakresie.
-
-Zamrażanie head uzyskuje wyłączną barierę i czeka tylko na zakończenie
-części pamięciowych rozpoczętych zapisów. Ustala graniczny LSN,
-zamraża aktywne bloki i zwalnia barierę bez czekania na dysk.
-Rotacja plików WAL jest odrębną czynnością flushera.
-Zapis segmentu danych i manifestu wykonuje zadanie flush w tle;
-nowe żądania w tym czasie aktualizują nowe aktywne bloki.
+ReadView odpowiada jednej chwili stanu wybranych szeregów, bez części
+paczki; całe query\_range używa tego samego widoku.
+Może zobaczyć dane klienta oczekującego na trwałość.
+Nie ma jednego globalnego LSN widoku: publikacje rozłącznych TS mogą
+kończyć się poza kolejnością WAL, a publikacje wspólnego TS zachowują
+tę kolejność. Odczyt po odpowiedzi sukcesu widzi zapis w swoim zakresie.
 
 \section{Model danych i kontrakty modułów}
 \label{sec:model}
@@ -395,149 +411,128 @@ dozwolone nazwy do wskazanej składni ASCII.
 
 \subsection{Struktury TSMap, TS i bloki}
 \label{sec:tsmap}
-Inspiracją jest oddzielenie katalogu TSmap, synchronizacji szeregu
-i otwartych oraz zamkniętych bloków z sekcji 4.2 artykułu Gorilla
-\cite{gorilla}. W projekcie pozostaje jedna TSMap dla całej bazy.
-Bloki przechowują niekompresowane próbki; ich rolą jest umożliwienie
-odczytu i dalszego zapisu podczas flush. Buforowanie dziennika nawiązuje
-do sekcji 4.3 artykułu, ale projekt jawnie rozróżnia None, Written i Synced.
-Domyślny tryb nie dopuszcza utraty potwierdzonych danych przy awarii procesu.
-
-\begin{lstlisting}
-TSMap {
-  by_key: HashMap<SeriesKey, Arc<TS>>,
-  by_id: Vec<Arc<TS>>,
-  label_index: LabelIndex,
-  catalog_version: AtomicU64
-}
-TS {
-  id: SeriesId,
-  key: SeriesKey,
-  state: RwLock<TSState>
-}
-TSState {
-  latest_time: Option<Timestamp>,
-  sealed_through: Option<Timestamp>,
-  last_lsn: Lsn,
-  active: MutableBlock,
-  frozen: Option<Arc<FrozenBlock>>,
-  persisted: Vec<BlockDescriptor>
-}
-\end{lstlisting}
-
-Mapę, wektor i indeks etykiet chroni jeden \code{RwLock} katalogu.
-\code{by_id} służy do skanowania podczas rotacji, a mapa do wyszukiwania
-po kluczu. Nie usuwa się szeregów ani nie ponownie wykorzystuje ich
-identyfikatorów; wektor jest uporządkowaną listą uchwytów, a nie tablicą
-indeksowaną bezpośrednio wartością ID. Wyszukiwanie po ID jest binarne.
-Klucz i identyfikator TS są niezmienne. Licznik wersji zwiększa się
-przy publikacji nowej zawartości katalogu, przed zwolnieniem blokad TS.
-
-Jeżeli paczka wymaga nowych szeregów, mutex rejestracji zapobiega
-równoległemu przydzieleniu dwóch TS temu samemu kluczowi. Po jego
-uzyskaniu ponawia się wyszukiwanie; nowe TS są przygotowywane poza
-publiczną mapą. Po włączeniu pełnej ramki do bufora WAL krótka wyłączna blokada
-TSMap publikuje je wraz z indeksami, podczas gdy wszystkie TS paczki
-pozostają zablokowane. Definicje nowych szeregów są w tej samej ramce
-co ich pierwsze próbki. Dopiero po publikacji paczki inne zadanie może
-użyć nowego TS, więc jego rekord zawsze będzie późniejszy od definicji.
-Blokada indeksu nie obejmuje dopisywania do bufora ani oczekiwania na I/O.
-Paczki dotyczące istniejących szeregów nie pobierają mutexu rejestracji.
-Nieudana rezerwacja ID może zostawić lukę, ale nie pusty publiczny szereg.
+Inspiracją jest oddzielenie katalogu, synchronizacji szeregu i bloków
+otwartych/zamkniętych w Gorilla, sekcje 4.2--4.3 \cite{gorilla}.
+Tutaj jedna TSMap obsługuje całą bazę, a bloki bez kompresji zapewniają
+dostępność podczas flush. Buforowany WAL ma jawne poziomy trwałości.
 
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}
-\node[box,text width=45mm] (map) at (0,0)
-  {TSMap: mapa i wektor\\indeks etykiet, RwLock};
-\node[box,text width=45mm] (ts) at (7,0)
-  {Arc<TS>: klucz, id\\osobny RwLock stanu};
-\node[box,text width=32mm] (active) at (0,-2.4)
-  {Blok aktywny\\Vec<Sample>};
-\node[box,text width=32mm] (frozen) at (4.5,-2.4)
-  {Blok zamrożony\\Arc<FrozenBlock>};
-\node[box,text width=32mm] (disk) at (9,-2.4)
-  {Bloki na dysku\\deskryptory};
-\draw[arrow] (map) -- node[note,above]{1 : N} (ts);
-\draw[arrow] (ts.south) -- ++(0,-0.6) -| (active.north);
-\draw[arrow] (ts.south) -- ++(0,-0.6) -| (frozen.north);
-\draw[arrow] (ts.south) -- ++(0,-0.6) -| (disk.north);
+\node[umlclass,text width=56mm] (map) at (0,0) {
+  \textbf{TSMap}\nodepart{second}
+  by\_key: HashMap<Key, Arc<TS>{}>\\
+  by\_id: Vec<Arc<TS>{}>\\
+  label\_index: LabelIndex\\
+  catalog\_version: AtomicU64\\
+  catalog: RwLock
+  \nodepart{third}lookup(key / id), select(labels)};
+\node[umlclass,text width=45mm] (ts) at (8,0) {
+  \textbf{TS}\nodepart{second}
+  id: SeriesId \{immutable\}\\key: SeriesKey \{immutable\}\\
+  state: RwLock<TSState>
+  \nodepart{third}validate(batch), append(plan)};
+\node[umlclass,text width=50mm] (st) at (8,-3.4) {
+  \textbf{TSState}\nodepart{second}
+  latest\_time: Option<Timestamp>\\
+  sealed\_through: Option<Time>\\last\_lsn: Lsn
+  \nodepart{third}freeze(), snapshot(bounds)};
+\node[umlclass,text width=43mm] (mut) at (0,-3.4) {
+  \textbf{MutableBlock}\nodepart{second}
+  samples: Vec<Sample> \{sorted\}
+  \nodepart{third}insert(sample), slice(bounds)};
+\node[umlclass,text width=43mm] (froz) at (0,-6.3) {
+  \textbf{FrozenBlock}\nodepart{second}
+  samples: Vec<Sample>\\\{immutable, shared by Arc\}
+  \nodepart{third}slice(bounds)};
+\node[umlclass,text width=50mm] (disk) at (8,-6.3) {
+  \textbf{BlockDescriptor}\nodepart{second}
+  segment, min/max, offset, count
+  \nodepart{third}read(bounds)};
+\draw[assoc] (map) -- node[note,pos=.12,above]{1}
+  node[note,pos=.83,above]{0..*} (ts);
+\draw[compose] (ts) -- node[note,right]{1 : 1} (st);
+\draw[compose] (st) -- node[note,above]{active: 1} (mut);
+\draw[assoc] (st.south west) -- ++(-0.8,0) |- node[note,pos=.7,above]
+  {frozen: 0..1} (froz.east);
+\draw[compose] (st) -- node[note,right]{persisted: 0..*} (disk);
 \end{tikzpicture}
-\caption{Jedna TSMap i niezależne TS. Każdy szereg ma jeden aktywny blok,
-co najwyżej jeden zamrożony oraz dowolną liczbę deskryptorów dyskowych.}
+\caption{Diagram klas modelu head (typy Rust, bez dziedziczenia).
+Romb oznacza własność; zwykłe linie także współdzielone uchwyty.
+Key = SeriesKey, Time = Timestamp; Sample = timestamp: i64 + value: f64 (16 B).}
+\label{fig:classes}
 \end{figure}
 
+Jeden RwLock katalogu chroni mapę, wektor i indeks etykiet.
+\code{by_id} to uporządkowana lista do skanowania przy zamrożeniu
+i binarnego lookup; luki ID są dopuszczalne, więc ID nie jest indeksem
+wektora. Szeregów nie usuwa się, a ID nie wykorzystuje ponownie.
+
+Rejestracja nowych TS wymaga mutexu i ponownego lookup. Przygotowuje je
+poza publiczną mapą; ich definicje i pierwsze próbki trafiają do jednej
+ramki WAL. Dopiero po enqueue i inicjalizacji head krótka wyłączna
+blokada katalogu publikuje TS oraz indeksy, zwiększając wersję przed
+zwolnieniem blokad TS. Katalog nie jest zablokowany podczas enqueue/I/O.
+Konkurent może użyć TS dopiero po publikacji, więc nie zaloguje próbek
+przed definicją. Istniejące TS nie wymagają mutexu rejestracji;
+nieudana rezerwacja może pozostawić lukę ID, nigdy pusty publiczny TS.
+
 \subsection{Duplikaty i atomowość paczek}
-W jednym szeregu może istnieć najwyżej jedna wartość dla danego znacznika
-czasu. W otwartym buforze ponowne przesłanie identycznej próbki jest
-operacją bez zmian; odpowiedź zawiera licznik duplikatów. Inna wartość
-dla tego samego czasu powoduje konflikt i odrzucenie całej paczki.
-To samo dotyczy powtórzeń wewnątrz paczki.
+W szeregu jest najwyżej jedna wartość dla czasu. Identyczna próbka
+w otwartym buforze to duplikat bez zmian; inna wartość odrzuca całą
+paczkę jako konflikt, również przy powtórzeniach wewnątrz paczki.
+Zamknięty zakres odrzuca nawet identyczny duplikat bez odczytu dysku:
+API nie daje bezterminowej idempotencji ani rejestru jej kluczy.
+Po utracie odpowiedzi wynik można sprawdzić zapytaniem.
 
-Po zamknięciu zakresu punkt z czasem mniejszym lub równym granicy
-zamknięcia jest odrzucany bez odczytywania dysku, także jeśli jest
-identycznym duplikatem. API nie zapewnia więc trwałej idempotencji
-ponowień przez dowolnie długi czas. Utrata odpowiedzi może pozostawić
-klienta bez wiedzy o wyniku; wynik można sprawdzić zapytaniem.
-Nie wprowadza się osobnego rejestru kluczy idempotencji.
-
-Walidacja wyznacza plan zmian dla całej paczki, z uwzględnieniem jej
-powtórzeń. Trwałość definicji nowych szeregów jest taka sama jak całej
-ramki. Paczka zawierająca wyłącznie identyczne duplikaty nie tworzy
-nowej ramki; jako cel oczekiwania bierze największe \code{last_lsn}
-szeregów tej paczki. Również wtedy wykonuje oczekiwanie Written lub Synced:
-ponowienie zapisu None nie może uzyskać mocniejszego potwierdzenia bez
-osiągnięcia odpowiedniej granicy WAL.
-Nie jest to obietnica, że wszystkie mniejsze LSN są już widoczne
-w innych szeregach. Paczki o wspólnym TS zachowują kolejność WAL,
-a rozłączne paczki nie wymagają wspólnej kolejności publikacji.
-
+Walidacja tworzy plan całej paczki; definicje i próbki mają wspólną
+trwałość ramki. Paczka samych duplikatów nie tworzy rekordu,
+lecz czeka na wybrany poziom dla maksimum \code{last_lsn}
+dotkniętych TS. Ponowienie None jako Synced wymaga więc rzeczywistego
+sync. LSN odpowiedzi nie obiecuje, że mniejsze LSN są już widoczne
+w rozłącznych TS.
 
 \subsection{Kontrakty wewnętrzne}
-Notacja określa granice modułów, bez narzucania osobnych crate'ów.
+Notacja nie narzuca osobnych crate'ów. Operacje zwracają
+\code{Result<T, Error>} z typowanym błędem właściwego modułu.
+Selektory, AST i widoki są pożyczane; \code{QueryBudget} jest mutowalny.
 
-\begin{lstlisting}
-enum Durability { None, Written, Synced }
+\begin{longtable}{P{74mm}P{82mm}}
+\tabhead{Operacja $\rightarrow$ wynik & Kontrakt}
+\code{canonicalize(Measurement)} $\rightarrow$ \code{CanonicalPoint};
+\code{parse(&str)} $\rightarrow$ \code{Expr} &
+Kanonizacja pomiaru; AST selektora, funkcji z oknem lub skalara.\\
+\code{submit(Vec<CanonicalPoint>, Durability)} $\rightarrow$
+\code{WriteReceipt} & Sukces: widoczna cała paczka i osiągnięta trwałość.
+Receipt: inserted, duplicates, lsn, durability.\\
+\code{snapshot(Selector, TimeBounds, QueryBudget)} $\rightarrow$
+\code{ReadView} & Wersja katalogu, kopie aktywnych próbek i uchwyty
+bloków/segmentów; reguły sekcji~\ref{sec:concurrency}.\\
+\code{read_series(ReadView, SeriesId, TimeBounds)} $\rightarrow$
+\code{SampleCursor} & Próbki chronologicznie, źródło ukryte.\\
+\code{evaluate(Expr, EvalGrid, ReadView, QueryBudget)} $\rightarrow$
+\code{QueryResult} & Budżet czasu, pamięci, próbek i wyniku.\\
+\code{wal.enqueue(EncodedRecord)} $\rightarrow$ \code{Lsn};
+\code{wal.wait_for(Lsn, Durability)} $\rightarrow$ \code{()} &
+Enqueue bez I/O, LSN końca ramki; wait po publikacji i zwolnieniu blokad.\\
+\code{freeze_head()} $\rightarrow$ \code{FrozenGeneration};
+\code{persist(FrozenGeneration)} $\rightarrow$ \code{Checkpoint} &
+Generacja zawiera numer head, cutoff LSN, katalog z chwili zamrożenia
+i uchwyty bloków; persist działa w tle.\\
+\code{recover(Path)} $\rightarrow$ \code{RecoveredState} &
+Stan po walidacji checkpointu i replay WAL.\\
+\end{longtable}
 
-canonicalize(input: Measurement) -> Result<CanonicalPoint, ValidationError>
-parse(text: &str) -> Result<Expr, ParseError>
+Błędy kontraktów: canonicalize/parse/submit zwracają odpowiednio
+\code{ValidationError}/\code{ParseError}/\code{WriteError};
+snapshot/read -- \code{ReadError}, evaluate -- \code{QueryError},
+enqueue/wait -- \code{AdmissionError}/\code{WaitError},
+freeze/persist -- \code{StorageError}, recover -- \code{RecoveryError}.
 
-submit(batch: Vec<CanonicalPoint>, mode: Durability)
-  -> Result<WriteReceipt, WriteError>
-// WriteReceipt { inserted, duplicates, lsn, durability }
-// Sukces: cala paczka jest widoczna i osiagnieto wybrany poziom.
-
-snapshot(selector: &Selector, bounds: TimeBounds,
-         budget: &mut QueryBudget) -> Result<ReadView, ReadError>
-read_series(view: &ReadView, id: SeriesId,
-            bounds: TimeBounds) -> Result<SampleCursor, ReadError>
-evaluate(expr: &Expr, grid: EvalGrid, view: &ReadView,
-         budget: &mut QueryBudget) -> Result<QueryResult, QueryError>
-
-wal.enqueue(record: EncodedRecord) -> Result<Lsn, AdmissionError>
-// Brak I/O; zwraca pozycje konca kompletnej ramki.
-wal.wait_for(lsn: Lsn, mode: Durability) -> Result<(), WaitError>
-// Wywolywane po publikacji head i zwolnieniu blokad.
-
-freeze_head() -> Result<FrozenGeneration, StorageError>
-persist(generation: FrozenGeneration) -> Result<Checkpoint, StorageError>
-recover(path: &Path) -> Result<RecoveredState, RecoveryError>
-\end{lstlisting}
-
-\code{Expr} zawiera selektor, funkcję czasową z oknem albo proste
-wyrażenie skalarne. \code{ReadView} przechowuje wersję katalogu,
-kopię potrzebnych aktywnych próbek i uchwyty do bloków i segmentów.
-\code{SampleCursor} zwraca próbki chronologicznie, bez ujawniania źródła.
-\code{QueryBudget} śledzi czas, pamięć, próbki i rozmiar wyniku.
-\code{FrozenGeneration} zawiera numer generacji head, graniczny LSN,
-katalog z chwili zamrożenia i uchwyty do zamrożonych bloków.
-
-Błędy walidacji, konfliktu i braku budżetu są zwracane przed enqueue.
-Po nim nie ma zwykłej ścieżki wycofania: publikacja korzysta z wcześniej
-zarezerwowanych zasobów. Timeout oczekiwania na trwałość lub utrata
-połączenia nie wycofują danych. Błąd I/O w WAL kończy proces zgodnie
-z sekcją~\ref{sec:wal-runtime}; nie jest mapowany na sukces.
-Pozostałe kategorie i mapowanie HTTP określa
+Walidacja, konflikt i brak budżetu kończą się przed enqueue.
+Po nim publikacja używa zarezerwowanych zasobów i nie ma zwykłego
+rollbacku; timeout/anulowanie nie wycofują danych.
+I/O WAL kończy proces; pozostałe błędy mapuje
 sekcja~\ref{sec:http-errors}.
 
 \subsection{Podział odpowiedzialności zespołu}
@@ -562,36 +557,25 @@ i kontraktów poprzedza ich wdrażanie po obu stronach.
 
 \subsection{Algorytm przyjęcia paczki}
 \begin{enumerate}
-\item Adapter rezerwuje miejsce przyjęcia, sprawdza rozmiar i tryb
-trwałości, dekoduje JSON oraz kanonizuje punkty.
-\item Zadanie uzyskuje uchwyty i blokady według
-sekcji~\ref{sec:concurrency}. Waliduje całą paczkę, w tym duplikaty,
-opóźnienie i granice zamknięcia. Rezerwuje pojemność head, indeksów,
-buforów kodowania i WAL, aby po enqueue nie odrzucać już operacji.
-\item Jeśli potrzebny jest flush albo oczekiwanie na pamięć, zwalnia
-blokady TS, barierę i mutex rejestracji przed czekaniem.
-Po ponowieniu waliduje stan od początku. Paczka niemieszcząca się
-nawet w pustym budżecie daje 422; przejściowy brak miejsca po
-maksymalnie 1 s oczekiwania daje 503, zawsze przed enqueue.
-\item Koduje rekord w buforze roboczym lokalnym dla wątku.
-Rekord zawiera definicje nowych szeregów, a następnie wszystkie
-nowe próbki paczki. Pod mutexem WAL kopiuje pełną ramkę do bufora
-i otrzymuje końcowy LSN. Nie czeka na write ani fdatasync.
-\item Nadal pod blokadami TS publikuje wszystkie próbki i metadane.
-Nowe TS i indeksy stają się publiczne dopiero po enqueue definicji
-i inicjalizacji head. Ustawia \code{last_lsn} zmienionych TS.
-\item Zwalnia wszystkie blokady i barierę oraz kończy część roboczą.
-None zwraca sukces; Written lub Synced czeka asynchronicznie
-na odpowiednią granicę WAL i dopiero wtedy zwraca sukces.
+\item Przed wczytaniem ciała zarezerwować miejsce przyjęcia;
+sprawdzić rozmiar/tryb, zdekodować JSON i kanonizować punkty.
+\item Pobrać uchwyty i blokady według sekcji~\ref{sec:concurrency}.
+Zweryfikować całą paczkę (duplikaty, opóźnienie, zamknięcie)
+i zarezerwować head, indeksy, scratch oraz WAL.
+\item Brak pamięci/konieczność flush: zwolnić wszystkie blokady,
+czekać i ponowić pełną walidację. Paczka niemieszcząca się
+w pustym budżecie: 422; przejściowy brak po maks. 1 s: 503.
+Oba błędy poprzedzają enqueue.
+\item W thread-local scratch zakodować definicje, potem nowe próbki.
+Pod mutexem WAL skopiować pełną ramkę i uzyskać LSN.
+\item Pod blokadami TS opublikować całą paczkę i nowe indeksy;
+zmienionym TS ustawić \code{last_lsn}.
+\item Zwolnić blokady, barierę i worker. None odpowiada;
+Written/Synced asynchronicznie czekają na odpowiedni prefiks.
 \end{enumerate}
-
-Kolejność enqueue jest globalna, lecz publikacje rozłącznych TS mogą
-skończyć się w innej kolejności. Część pamięciowa zachowuje atomowość
-paczki, a nie transakcję łączącą publikację z fizyczną synchronizacją.
-Błąd I/O w tle kończy proces. Odpowiedź None mogła już zostać wysłana;
-odpowiedź Written lub Synced wymaga osiągnięcia odpowiedniej granicy.
-Recovery odtworzy również kompletne ramki, dla których klient nie
-otrzymał odpowiedzi albo publikacja head nie zdążyła się zakończyć.
+Recovery może odtworzyć kompletną ramkę także bez odpowiedzi klientowi
+lub bez zakończonego head append. Atomowość publikacji nie łączy jej
+w jedną transakcję z fizyczną synchronizacją.
 
 \begin{figure}[htbp]
 \centering
@@ -617,102 +601,71 @@ None kończy się po publikacji head, Written po write, Synced po sync.}
 \end{figure}
 
 \subsection{Warunki przyjmowania out-of-order}
-Dla szeregu $s$ oznaczamy:
-\begin{itemize}
-\item $H_s$ -- największy czas przyjęty w tym szeregu, także na dysku;
-\item $S_s$ -- granicę zamknięcia: największy czas w zamrożonych lub
-opublikowanych danych szeregu; przed pierwszym zrzutem jest nieokreślona;
-\item $W$ -- skonfigurowane maksymalne opóźnienie.
-\end{itemize}
-
-Aby wynik walidacji nie zależał od kolejności JSON, wszystkie punkty
-paczki sprawdza się względem $H_s$ sprzed tej paczki.
-Każdy jej nowy punkt musi spełniać:
+$H_s$ to największy przyjęty czas szeregu (także na dysku), $S_s$ --
+największy czas danych zamrożonych/opublikowanych, a $W$ -- okno
+opóźnienia. Dla każdego nowego punktu:
 \[
-  t>S_s\quad\text{oraz}\quad t\geq H_s-W .
+ t>S_s \quad\land\quad t\geq H_s-W.
 \]
-Warunek z $S_s$ pomija się, gdy nie zamrożono jeszcze bloku szeregu.
-Warunek z $H_s$ pomija się dla nowego szeregu. Po publikacji całej
-paczki $H_s$ zwiększa się do maksimum starej wartości i jej nowych czasów.
-Porównania wykonuje się z kontrolą przepełnienia; ujemna dolna granica
-okna jest równoważna zeru dla dopuszczonej dziedziny czasu.
-Identyczny duplikat obecny w otwartym buforze jest rozpoznawany przed
-testem $W$ i nie staje się nowym zapisem; konflikt wartości jest błędem.
-Warunek zamkniętego zakresu ma pierwszeństwo przed obsługą duplikatów.
+$S_s$ pomija się przed pierwszym zamrożeniem, $H_s$ dla nowego TS.
+Całą paczkę waliduje się względem $H_s$ sprzed paczki, niezależnie od
+kolejności JSON; po publikacji $H_s$ jest maksimum starego i nowych czasów.
+Arytmetyka jest sprawdzana, ujemna dolna granica oznacza zero.
 
-Czas próbki nie może wyprzedzać zegara serwera o więcej niż 60 s.
-Chroni to $H_s$ przed przypadkowym przesunięciem daleko w przyszłość.
-Zegar ścienny jest używany do tego testu i domyślnego czasu zapytania;
-czas przebywania w RAM oraz timeouty są mierzone zegarem monotonicznym.
+Kolejność decyzji: zamknięty zakres $\rightarrow$ duplikat/konflikt
+w otwartym buforze $\rightarrow$ test $W$ dla nowego punktu.
+Identyczny otwarty duplikat nie staje się nowym zapisem.
+Próbka może wyprzedzać zegar serwera najwyżej o 60 s, co chroni $H_s$
+przed błędnym przesunięciem. Zegar ścienny służy temu testowi i domyślnemu
+czasowi zapytania; pobyt w RAM i timeouty używają zegara monotonicznego.
 
-\begin{tabularx}{\linewidth}{P{35mm}P{45mm}Y}
+\begin{tabularx}{\linewidth}{P{63mm}P{28mm}Y}
 \toprule
-Stan szeregu & Punkt & Wynik\\ \midrule
-$H=12{:}10$, $S=12{:}00$, $W=5$ min & $t=12{:}06$ & Przyjęcie do otwartego bufora.\\
-Ten sam stan & $t=12{:}04$ & Odrzucenie: przekroczone okno opóźnienia.\\
-Po zamrożeniu: $S=12{:}10$ & $t=12{:}09$ & Odrzucenie: zakres zamknięty,
-nawet jeśli flush jeszcze trwa.\\
-Po zamrożeniu: $S=12{:}10$ & $t=12{:}11$ & Przyjęcie do nowego aktywnego bloku.\\
+Stan & Czas punktu & Wynik\\ \midrule
+$H=12{:}10$, $S=12{:}00$, $W=5$ min & 12:06 / 12:04 &
+Przyjęcie / przekroczone $W$.\\
+Po zamrożeniu $S=12{:}10$ & 12:09 / 12:11 &
+Zakres zamknięty / nowy aktywny blok (także podczas flush).\\
 \bottomrule
 \end{tabularx}
 
-Przy $W=0$ paczka może wprowadzić kilka nowych czasów, ale żaden nie
-może być starszy od $H_s$ sprzed paczki. Punkty wewnątrz jednej
-atomowej paczki nie ustalają kolejności przyjmowania między sobą.
-Standardowy profil demonstracji korzysta z $W=5$ min.
+Przy $W=0$ paczka może zawierać kilka czasów, ale żaden nowy nie może
+poprzedzać starego $H_s$; punkty paczki nie ustalają kolejności przyjęcia.
+Profil standardowy: $W=5$ min.
 
 \subsection{Organizacja i limit pamięci}
-Bufor szeregu jest wektorem 16-bajtowych próbek posortowanych po czasie.
-Zapis rosnący dopisuje na końcu, a out-of-order korzysta z wyszukiwania
-binarnego i wstawienia. Odczyt zakresu wymaga dwóch wyszukiwań binarnych
-oraz przejścia po wybranym wycinku. Koszt wstawiania starszych próbek jest
-liniowy względem liczby przesuwanych elementów; udział takich zapisów
-będzie osobnym parametrem eksperymentu.
+Posortowany wektor dopisuje rosnące czasy na końcu; out-of-order wymaga
+wyszukiwania binarnego i liniowego przesunięcia. Dwa wyszukiwania
+wyznaczają wycinek odczytu. Pojemność rośnie przez
+\code{try_reserve_exact} w wielokrotnościach 4096 próbek;
+rozlicza się faktyczną pojemność, także zapas i przejściowe
+współistnienie starej/nowej alokacji.
 
-Pojemność wektorów zwiększa się o wielokrotności 4096 próbek przez
-\code{try_reserve_exact}; rozlicza się rzeczywistą pojemność przydzieloną
-przez kontener, nie samą liczbę punktów. Zmniejszenie limitu pamięci
-poniżej minimalnej wymaganej alokacji jest błędem konfiguracji lub
-odrzuceniem paczki, a nie powodem nieskończonego ponawiania flush.
+Budżet head obejmuje aktywne, zamrożone i podtrzymywane przez ReadView
+bloki, każdy współdzielony blok raz do ostatniego uchwytu.
+Katalog, przyjęcia, WAL i zapytania mają osobne budżety.
+Rezerwacja poprzedza enqueue; błąd nie publikuje próbek.
+Za mały limit minimalnej alokacji oznacza błąd konfiguracji/paczki,
+bez nieskończonego flush.
 
-Limit bufora obejmuje aktywne i zamrożone próbki, bloki podtrzymywane
-przez istniejące widoki odczytu oraz pojemność zapasową.
-Współdzielony blok jest liczony jeden raz, aż do zwolnienia ostatniego
-uchwytu. Katalog, kolejka i zapytania mają osobne limity. Przed
-utrwaleniem paczki sprawdza się możliwość przydziału; pojemność może
-zostać zarezerwowana wcześniej, lecz nieudany zapis nie publikuje próbek.
-Przy wzroście wymagającym realokacji uwzględnia się przejściowe
-współistnienie starego i nowego bloku pamięci.
-
-Zamrożenie przenosi własność wektora do \code{Arc<FrozenBlock>},
-bez pełnej kopii generacji. Nowy blok aktywny alokuje pamięć w miarę napływu
-danych. Zapytania kopiują potrzebne wycinki tylko z bloków aktywnych;
-dla niezmiennych bloków przechowują uchwyty. Blok zamrożony może pozostać
-w RAM po publikacji segmentu, dopóki nie zakończy się wcześniejszy odczyt.
-To podtrzymanie pamięci jest uwzględniane w limicie i testach RSS.
+Zamrożenie przenosi wektor do \code{Arc<FrozenBlock>} bez pełnej kopii.
+Nowy aktywny blok alokuje w miarę napływu danych. Zapytania kopiują
+wyłącznie potrzebne aktywne próbki; niezmienne dane współdzielą.
+Po publikacji segmentu starszy widok może nadal podtrzymywać RAM,
+co uwzględnia się w budżecie i pomiarach RSS.
 
 \subsection{Wyzwalanie i przebieg zrzutu}
-Timer sprawdzany co 1 s zleca zrzut, jeżeli najstarsza próbka bieżącej
-generacji przebywa w RAM przez skonfigurowany czas. Ten termin oznacza
-\emph{rozpoczęcie} zrzutu; zwolnienie pamięci wymaga czasu I/O.
-Drugim wyzwalaczem jest brak miejsca na następną paczkę.
-Przy włączonym limicie zlecenie następuje już po przekroczeniu 80\%
-budżetu, aby zostawić miejsce na nowe aktywne bloki.
+Timer co 1 s zleca flush po upływie czasu pobytu najstarszej próbki
+generacji w RAM; termin dotyczy rozpoczęcia, nie zwolnienia pamięci.
+Inne wyzwalacze: przekroczenie 80\% budżetu lub brak miejsca na paczkę.
 Pustej generacji nie zrzuca się.
 
-Koordynator przeprowadza wspólne zamrożenie niepustych bloków head.
-Nie przełącza przy tym plików WAL.
-Po zwolnieniu bariery zapis do nowej generacji odbywa się
-równolegle z utrwalaniem poprzedniej. W tle działa jeden wykonawca flush;
-do jego zakończenia nie zamraża się następnej generacji.
-W razie upływu czasu buforowania żądanie kolejnej rotacji pozostaje
-oczekujące, ale nie tworzy nieograniczonej kolejki zamrożonych bloków.
-
-Przy twardym limicie pamięci nowe paczki czekają krótko bez blokad
-lub otrzymują 503. Dostępność podczas flush nie oznacza nieograniczonego
-przyjmowania danych przy dowolnie wolnym dysku.
-Dokładną kolejność operacji i zakres usuwania WAL określa
-sekcja~\ref{sec:checkpoint}.
+Koordynator zamraża razem niepuste bloki, bez rotacji WAL.
+Po zwolnieniu bariery nowe zapisy działają równolegle z jednym flush
+w tle (sekcja~\ref{sec:checkpoint}). Do jego zakończenia następny flush
+pozostaje oczekujący, bez kolejki zamrożonych generacji.
+Przy twardym limicie paczki krótko czekają bez blokad lub dostają 503;
+dostępność podczas flush podlega ograniczonej pamięci i szybkości dysku.
 
 \begin{figure}[htbp]
 \centering
@@ -738,141 +691,123 @@ Kolejna rotacja czeka na zakończenie poprzedniego flush.}
 
 \subsection{Katalog i wspólne reguły formatu}
 \begin{lstlisting}
-data/
-  LOCK
-  MANIFEST
-  wal/
-    wal-00000000000000000001.log
-    wal-00000000000000000002.log
-  segments/
-    segment-00000000000000000001.bin
-    segment-00000000000000000002.bin
+data/LOCK
+data/MANIFEST
+data/wal/wal-00000000000000000001.log
+data/segments/segment-00000000000000000001.bin
 \end{lstlisting}
+Obie numeracje mają po 20 cyfr: segmenty to generacje head, WAL to
+niezależna kolejność plików. Nazwy tymczasowe kończą się \code{.tmp}.
+Jeden WAL jest aktywny, starsze czekają na checkpoint.
+Manifest wskazuje segmenty danych; replay obejmuje kotwicę i wszystkie
+późniejsze opublikowane WAL, także utworzone podczas flush.
 
-Numery segmentów danych identyfikują generacje head, a numery plików WAL
-niezależną kolejność plików dziennika. Obie numeracje mają po 20 pozycji.
-Pliki tymczasowe mają końcówkę \code{.tmp}.
-Zawsze istnieje jeden aktywny plik WAL, do którego wolno dopisywać,
-oraz ewentualne wcześniejsze pliki oczekujące na checkpoint.
-Manifest jest jedynym źródłem informacji o tym, które segmenty należą
-do bazy. Dla WAL recovery rozpoczyna od kursora zapisanego w manifeście
-i uwzględnia wszystkie późniejsze opublikowane pliki, także utworzone
-przed publikacją następnego checkpointu.
-
-Wszystkie liczby binarne mają kolejność \emph{little-endian}.
-Liczby zmiennoprzecinkowe zapisuje się przez 64-bitową reprezentację
-IEEE 754. Nie zapisuje się surowego układu struktur Rust ani paddingu.
-Napisy mają postać \code{u32 byte_len} i dokładnie tylu bajtów UTF-8.
-Arytmetyka długości i offsetów jest sprawdzana przed alokacją i odczytem.
-
-Wersja segmentów danych wynosi 2, a WAL i manifestu 3.
-Nowa wersja wprowadza bajtowy LSN i niezależne numeracje head i WAL.
-Nieznana wersja, niezerowe zastrzeżone flagi,
-nieprawidłowy UTF-8 i naruszenia zadeklarowanych długości są błędem
-uruchomienia. Zmiana wersji wymaga osobnej migracji; projekt nie zakłada
-zgodności plików obecnego prototypu z tą specyfikacją.
-
-Sumy kontrolne to CRC-32/IEEE, zgodne z \code{crc32fast}
-\cite{crc}. Wartość testowa dla ASCII \code{123456789} wynosi
-\code{0xCBF43926}. CRC wykrywa przypadkowe uszkodzenia, ale nie zapewnia
-uwierzytelnienia. Sumy zapisuje się jako \code{u32} little-endian.
+Formaty: little-endian, IEEE 754 f64, bez paddingu/układu struktur Rust;
+napis = \code{u32 byte_len} + UTF-8. Długości, offsety i przepełnienia
+sprawdza się przed alokacją/odczytem.
+Segment ma wersję 2, WAL/manifest 3 (bajtowy LSN, niezależne numeracje).
+Nieznana wersja, niezerowe flagi, błędne długości/UTF-8 zatrzymują start;
+migracja i zgodność z plikami prototypu nie są zapewnione.
+CRC-32/IEEE \cite{crc}, zapis u32 LE, ma wektor
+\code{123456789 -> 0xCBF43926}; wykrywa uszkodzenia, nie uwierzytelnia.
 
 \subsection{Bufor WAL, flusher i syncer}
 \label{sec:wal-runtime}
-Usługa utrzymuje jeden logiczny strumień WAL. Bufor
-\code{Mutex<Vec<u8>>} przechowuje pełne ramki wraz z początkową pozycją
-logiczną. Żądanie koduje rekord w lokalnym buforze roboczym, a pod mutexem
-jedynie dopisuje bajty i zwiększa \code{enqueued_end} o długość ramki.
-Nie wykonuje operacji plikowych.
-
-Trzy granice są monotonicznymi końcami ciągłych prefiksów:
+Jeden logiczny strumień utrzymuje monotoniczne końce ciągłych prefiksów:
 \[
-  0 \leq synced\_end \leq written\_end \leq enqueued\_end .
+  0\leq synced\_end\leq written\_end\leq enqueued\_end.
 \]
-Żądanie zapamiętuje własne \code{lsn = record_end}.
-Granice nie mówią, czy zadanie zdążyło już opublikować próbki w head.
-Dlatego checkpoint wymaga osobnej bariery części pamięciowej.
+Cel żądania to \code{lsn = record_end}. Prefiksy opisują WAL, nie stan
+publikacji head; do checkpointu potrzebna jest osobna bariera.
 
-\begin{longtable}{P{25mm}P{61mm}P{70mm}}
-\tabhead{Tryb & Warunek odpowiedzi po publikacji head & Gwarancja}
-None & Bez oczekiwania na I/O. &
-Awaria procesu może utracić potwierdzoną paczkę; zachowane kompletne
-ramki nadal mogą zostać odtworzone.\\
-Written & \code{written_end >= lsn}. &
-Cała ramka jest w systemie operacyjnym. Przy awarii samego procesu,
-bez awarii hosta i nośnika, potwierdzone dane są odtwarzane.\\
-Synced & \code{synced_end >= lsn}. &
-Ramka objęta zakończonym fdatasync i trwała publikacja jej pliku.
-Obowiązują gwarancje synchronizacji lokalnego systemu plików.\\
+\begin{longtable}{P{23mm}P{133mm}}
+\tabhead{Tryb & Warunek sukcesu po publikacji head i gwarancja}
+None & Bez oczekiwania na I/O: awaria procesu może utracić paczkę;
+zachowane pełne ramki mogą wrócić w replay.\\
+Written & \code{written_end >= lsn}: cała ramka w OS/page cache.
+Przetrwa awarię samego procesu przy sprawnym hoście i nośniku.\\
+Synced & \code{synced_end >= lsn}: zakończone fdatasync i trwała
+publikacja nazwy pliku; gwarancje lokalnego systemu plików.\\
 \end{longtable}
 
-\textbf{Flusher} jest jedynym wykonawcą dopisywania do plików WAL.
-Przy braku oczekujących klientów zapisuje bufor co najwyżej co 10 ms
-lub po zgromadzeniu 1 MiB. Written i Synced rejestrują cel oczekiwania
-i budzą flusher wcześniej. Przy takich celach flusher może odczekać
-do 200 mikrosekund od pobudzenia na zebranie grupy; jest to parametr
-do pomiarów, nie cel opóźnienia całego żądania.
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\node[umlclass,text width=53mm] (wal) at (0,0) {
+  \textbf{WAL}\nodepart{second}
+  buffer: Mutex<Vec<u8>{}> + base LSN\\
+  enqueued\_end: Lsn\\
+  progress: watch<WalProgress>
+  \nodepart{third}enqueue(record): Lsn\\wait\_for(lsn, mode)};
+\node[umlclass,text width=44mm] (prog) at (7.9,0) {
+  \textbf{WalProgress}\nodepart{second}
+  written\_end: Lsn\\synced\_end: Lsn
+  \nodepart{third}publish\_monotonic()};
+\node[umlclass,text width=53mm] (flush) at (0,-3.5) {
+  \textbf{Flusher}\nodepart{second}
+  owned\_buffer, file: Arc<File>
+  \nodepart{third}swap(), write\_all(), rotate()};
+\node[umlclass,text width=44mm] (sync) at (7.9,-3.5) {
+  \textbf{Syncer}\nodepart{second}
+  file: Arc<File>, target: Lsn
+  \nodepart{third}capture(), fdatasync()};
+\draw[assoc] (wal) -- node[note,above]{postęp / wait} (prog);
+\draw[assoc] (wal) -- node[note,left]{przejęcie bufora} (flush);
+\draw[arrow,dashed] (flush.east) -- node[note,above]{plik + cel} (sync.west);
+\draw[arrow,dashed] (flush.north east) -- node[note,sloped,above]
+  {Written} (prog.south west);
+\draw[arrow,dashed] (sync) -- node[note,right]{Synced} (prog);
+\end{tikzpicture}
+\caption{Diagram klas współpracy WAL. Flusher i Syncer to niezależne
+wątki; przerywane strzałki oznaczają zależność, linie ciągłe asocjację.
+Durability = None | Written | Synced.}
+\label{fig:wal-classes}
+\end{figure}
 
-Pod mutexem podmienia bufor na pusty i zachowuje zakres LSN przejętych
-bajtów. Po zwolnieniu mutexu zapisuje je sekwencyjnie przez
-\code{write_all}; pojedynczy \code{write} może zapisać mniej bajtów
-niż żądano \cite{linux-write}.
-Nowe żądania w tym czasie dopisują do nowego bufora.
-\code{written_end} zwiększa się dopiero po zapisaniu pełnych ramek,
-także dla porcji kończącej plik przed jego synchronizacją i rotacją.
-Flusher nie czeka na aktualizację head ani na blokady TS.
+\begin{description}[leftmargin=0pt,style=nextline]
+\item[Enqueue.] Żądanie koduje w thread-local scratch; pod mutexem
+kopiuje kompletną ramkę do bufora i zwiększa enqueued\_end.
+Nie wykonuje I/O (kolejność publikacji: sekcja~\ref{sec:write}).
+\item[Flusher.] Jedyny dopisujący do plików. Bez waiterów: zapis
+co najwyżej co 10 ms lub po 1 MiB. Written/Synced rejestrują cel
+i budzą go wcześniej; od pobudzenia może zebrać grupę przez 200~$\mu$s
+(parametr pomiarowy, nie cel opóźnienia HTTP).
+Pod mutexem podmienia bufor na pusty i zachowuje zakres LSN;
+poza nim sekwencyjnie wykonuje \code{write_all}.
+Pojedynczy write może być krótki \cite{linux-write}.
+Written publikuje wyłącznie dla pełnych ramek, także przed rotacją;
+nowe żądania już dopisują do nowego bufora.
+\item[Syncer.] Co 1 s lub przy niezaspokojonym celu Synced:
+jeśli cel jest w RAM, budzi flusher i czeka na Written.
+\emph{Przed} fdatasync zapamiętuje uchwyt pliku i zapisany cel;
+po sukcesie potwierdza tylko ten prefiks, bez późniejszych dopisań.
+\item[Oczekiwanie.] Wspólny watch przechowuje ostatni stan obu granic
+\cite{tokio-watch}; aktualizacje zachowują monotoniczność.
+Waiter sprawdza stan przed czekaniem i po zmianie, nie wymaga każdego
+zdarzenia. Zamknięcie kanału nie daje sukcesu. Timeout 30 s/anulowanie
+kończą wait bez rollbacku.
+\item[Rotacja.] Przed ramką przekraczającą 128 MiB razem z nagłówkiem:
+nie dzielić rekordu; zsynchronizować stary plik, opublikować Synced;
+utworzyć nowy jako .tmp, zapisać/synchronizować nagłówek,
+rename i sync katalogu wal/, dopiero potem pisać ramki.
+Sam sync pliku nie utrwala jego nazwy \cite{linux-sync}.
+Krótka blokada stanu I/O uzgadnia plik i cel, nigdy nie obejmuje
+fdatasync. Uchwyt pozostaje ważny; Synced nowego pliku wymaga trwałego
+prefiksu poprzednich. Rotacja nie pobiera bariery head ani blokad TS.
+\item[Pamięć i błędy.] 32 MiB rozlicza rzeczywiste pojemności bufora
+aktywnego i przejętego; scratch podlega budżetowi przyjęcia, także
+między żądaniami. Brak miejsca: oczekiwanie bez blokad TS lub 503
+przed enqueue, bez nieograniczonej kolejki.
+Każdy błąd write, fdatasync lub publikacji WAL: raport i natychmiastowe
+zakończenie procesu (fail-stop), bez sukcesu nieosiągniętym celom.
+None mogło już odpowiedzieć. Replay odtwarza poprawny prefiks;
+uszkodzony nośnik/pełna ramka CRC mogą zatrzymać start.
+\end{description}
 
-\textbf{Syncer} synchronizuje zapisane dane co 1 s albo wcześniej,
-gdy istnieje niezaspokojony cel Synced. Jeśli żądana ramka nadal jest
-w RAM, budzi flusher i czeka na odpowiedni postęp Written.
-Przed fdatasync zapamiętuje uchwyt do konkretnego pliku i granicę
-zapisanych bajtów. Po sukcesie potwierdza wyłącznie ten prefiks.
-Nie pobiera późniejszego written\_end i nie uznaje dopisań wykonanych
-w trakcie synchronizacji za automatycznie trwałe.
-
-Postęp obu granic jest publikowany przez wspólny kanał watch,
-z aktualizacją zachowującą monotoniczność obu pól.
-Oczekujący najpierw sprawdza bieżący stan, potem zmiany; nie polega
-na otrzymaniu każdego zdarzenia. Watch przechowuje ostatnią wartość,
-co odpowiada oczekiwaniu na przekroczenie granicy \cite{tokio-watch}.
-Zamknięcie kanału nie jest sukcesem. Timeout domyślnie 30 s lub
-anulowanie klienta kończy oczekiwanie bez wycofania danych.
-
-\textbf{Rotacja fizyczna} następuje przed ramką, która przekroczyłaby
-128 MiB pliku, razem z 32-bajtowym nagłówkiem.
-Rekordów nie dzieli się między pliki. Flusher synchronizuje stary plik,
-publikuje jego granicę Synced i tworzy nowy pod nazwą tymczasową.
-Zapisuje i synchronizuje nagłówek, wykonuje rename i synchronizuje
-katalog \code{wal/}; dopiero potem zapisuje ramki nowego pliku.
-Synchronizacja samego pliku nie zapewnia trwałości jego nowej nazwy
-w katalogu \cite{linux-sync}.
-
-Flusher i syncer uzgadniają uchwyt pliku i jego granicę pod krótką
-blokadą stanu I/O, ale nie utrzymują jej przez fdatasync.
-Uchwyt pozostaje ważny do zakończenia operacji.
-Synced nowego pliku wymaga trwałego prefiksu wcześniejszych plików.
-Rotacja WAL nie zamraża head i nie wymaga bariery TS.
-
-\code{sync_file_range} nie jest elementem protokołu trwałości.
-Może zostać dodane jako osobno zmierzona optymalizacja writeback,
-ale nie zastępuje fdatasync \cite{linux-range}.
-Okres 1 s nie ogranicza sam z siebie możliwej straty danych None:
-zależy ona również od opóźnienia flushera i ilości danych w RAM.
-
-\textbf{Budżet WAL} domyślnie wynosi 32 MiB i obejmuje rzeczywistą
-pojemność bufora przyjmującego oraz bufora przejętego przez flusher.
-Bufory kodowania żądań należą do osobnego budżetu przyjęcia.
-Zapas lokalnych buforów roboczych pozostaje rozliczony także między
-żądaniami, dopóki ich pamięć nie zostanie zwolniona.
-Brak miejsca powoduje oczekiwanie bez blokad TS albo 503 przed enqueue.
-Nie dodaje się nieograniczonej kolejki pomiędzy buforem a flusherem.
-
-Błąd write, fdatasync albo publikacji pliku WAL powoduje raport błędu
-i natychmiastowe zakończenie procesu. Nie wysyła się sukcesu celom,
-których granica nie została osiągnięta. None mogło już otrzymać odpowiedź.
-Recovery odtwarza poprawny prefiks; błąd nośnika lub pełnej ramki CRC
-może zatrzymać start, więc zakończenie procesu nie oznacza automatycznej
-naprawy dowolnej usterki.
+\code{sync_file_range} pozostaje opcjonalną, osobno mierzoną
+optymalizacją writeback; nie zastępuje fdatasync \cite{linux-range}.
+Okres 1 s nie ogranicza straty None: zależy ona też od opóźnienia
+flushera i danych pozostających w RAM.
 
 \subsection{Format dziennika i bajtowy LSN}
 \label{sec:wal}
@@ -880,60 +815,48 @@ Plik ma następujący nagłówek:
 \begin{longtable}{P{20mm}P{24mm}P{38mm}P{74mm}}
 \tabhead{Offset & Rozmiar & Pole & Znaczenie}
 0 & 8 B & magic & ASCII \code{RSTWAL03}.\\
-8 & 2 B & version & \code{u16 = 3}.\\
-10 & 2 B & flags & \code{u16 = 0}.\\
-12 & 4 B & header\_len & \code{u32 = 32}.\\
+8 / 10 / 12 & 2 / 2 / 4 B & version / flags / header\_len &
+\code{u16=3} / \code{u16=0} / \code{u32=32}.\\
 16 & 8 B & segment\_id & \code{u64}; numer pliku zgodny z nazwą.\\
 24 & 8 B & base\_lsn & Logiczna pozycja początku pierwszej ramki.\\
 32 & zmienny & frames & Pełne ramki w kolejności enqueue.\\
 \end{longtable}
 
-LSN liczy wyłącznie bajty ramek, bez nagłówków plików.
-Koniec oznacza pozycję pierwszego bajtu po rekordzie, nie ostatniego
-bajtu należącego do rekordu.
-Dla końca rekordu na fizycznej pozycji $p$:
+LSN to liczba bajtów ramek bez nagłówków: pozycja pierwszego bajtu
+\emph{po} rekordzie. Dla fizycznego końca $p$:
 \[
-  record\_end = base\_lsn + (p-32).
+ record\_end=base\_lsn+(p-32).
 \]
-W pustej bazie base\_lsn wynosi 0. Przy rotacji następny plik ma base\_lsn
-równy końcowi poprzedniego strumienia, a nie ten koniec plus 1.
-Przyrost LSN jest długością rekordu. Sumy i liczniki są sprawdzane
-przed przepełnieniem.
+Pusta baza ma base=0; następny plik zaczyna się na końcu poprzednika,
+bez dodawania 1. Przyrost = długość ramki; arytmetyka sprawdzana.
 
 Ramka ma układ \code{len | crc32 | kind | flags | reserved | payload}:
 \begin{longtable}{P{20mm}P{24mm}P{38mm}P{74mm}}
 \tabhead{Offset & Rozmiar & Pole & Znaczenie}
 0 & 4 B & record\_len & Cała długość ramki, od 20 B do 8 MiB.\\
 4 & 4 B & crc32 & CRC bajtów 0--3 i 8--końca ramki, z pominięciem pola CRC.\\
-8 & 1 B & kind & \code{u8 = 1}, atomowa paczka ingest.\\
-9 & 1 B & flags & \code{u8 = 0}.\\
-10 & 2 B & reserved & \code{u16 = 0}.\\
+8 / 9 / 10 & 1 / 1 / 2 B & kind / flags / reserved &
+\code{u8=1} (paczka) / \code{u8=0} / \code{u16=0}.\\
 12 & record\_len $-12$ & payload & Definicje szeregów, a następnie próbki.\\
 \end{longtable}
 
-Payload zapisuje się w kolejności:
+Payload w kolejności:
 \begin{enumerate}
-\item \code{new_series_count: u32}.
-\item Dla każdej definicji: \code{id: u64}, napis metryki,
-\code{label_count: u16} i pary napisów nazwa--wartość.
-Definicje są uporządkowane po ID, etykiety kanonicznie.
-\item \code{point_count: u32}, dodatnia liczba nowych próbek.
-\item Próbki po 24 B: \code{series_id: u64},
-\code{timestamp: i64}, \code{value_bits: u64}, uporządkowane po ID i czasie.
+\item \code{new_series_count: u32}, potem definicje rosnąco po ID:
+\code{id: u64}, napis metryki, \code{label_count: u16},
+kanonicznie posortowane pary napisów nazwa--wartość.
+\item Dodatni \code{point_count: u32}, potem próbki rosnąco po ID/czasie:
+\code{series_id: u64, timestamp: i64, value_bits: u64} (24 B).
 \end{enumerate}
+Duplikatów bez zmian nie zapisuje się; każda definicja ma próbkę
+w tej ramce. ID musi pochodzić z checkpointu, wcześniejszej ramki
+lub jej definicji; brak jest błędem, bez odkładania/pomijania.
 
-Duplikat bez zmian nie pojawia się w payloadzie. Każda nowa definicja
-ma co najmniej jedną próbkę w tej samej ramce. Identyfikator próbki
-musi pochodzić z checkpointu, wcześniejszej ramki lub bieżącej definicji.
-Nieznanego ID nie odkłada się do przyszłego rekordu ani nie pomija.
-Brak definicji jest błędem formatu lub protokołu rejestracji.
-
-Jedna próbka istniejącego szeregu daje payload $4+4+24=32$ B
-i ramkę $12+32=44$ B. Jeżeli jest pierwszą w pustej bazie, jej
-LSN końcowy wynosi 44, a fizyczny koniec pliku 76.
-Pełna ramka z poprawną sumą jest jednostką replay; nie ma osobnego
-rekordu commit ani gwarancji wycofania paczki bez odpowiedzi.
-Nowy typ kind lub niezerowe flagi wymagają rozszerzenia formatu.
+Próbka istniejącego TS: payload $4+4+24=32$ B, ramka $12+32=44$ B;
+jako pierwsza w pustym strumieniu daje LSN=44 i EOF=76.
+Jednostka replay to pełna ramka z poprawnym CRC, bez osobnego commit
+i gwarancji rollbacku paczki bez odpowiedzi.
+Nowy kind/niezerowe flagi wymagają rozszerzenia formatu.
 
 \subsection{Segment danych}
 \label{sec:segment}
@@ -945,9 +868,8 @@ tablica indeksu oraz 4-bajtowa suma całego pliku bez tej końcowej sumy.
 \begin{longtable}{P{20mm}P{24mm}P{38mm}P{74mm}}
 \tabhead{Offset & Rozmiar & Pole & Znaczenie}
 0 & 8 B & magic & ASCII \code{RSTSEG02}.\\
-8 & 2 B & version & \code{u16 = 2}.\\
-10 & 2 B & flags & \code{u16 = 0}.\\
-12 & 4 B & header\_len & \code{u32 = 48}.\\
+8 / 10 / 12 & 2 / 2 / 4 B & version / flags / header\_len &
+\code{u16=2} / \code{u16=0} / \code{u32=48}.\\
 16 & 8 B & generation & Numer generacji \code{u64}.\\
 24 & 8 B & cutoff\_lsn & Końcowy bajtowy LSN prefiksu objętego zrzutem.\\
 32 & 8 B & series\_count & Liczba bloków i wpisów indeksu.\\
@@ -1027,114 +949,83 @@ Wartość CRC segmentu jest miejscem na sumę wyliczaną z rzeczywistych danych.
 }
 \end{lstlisting}
 
-\code{generation} jest numerem zrzutu head, nie numerem pliku WAL.
-\code{checkpoint_lsn} jest logicznym końcem wszystkich rekordów
-odwzorowanych w opublikowanych segmentach.
-\code{replay} wskazuje fizyczny koniec ostatniej ramki objętej checkpointem.
-Plik zawierający tę pozycję pozostaje kotwicą recovery nawet wtedy,
-gdy kończy się dokładnie na tej granicy.
-Kursor musi spełniać
+\code{generation} numeruje head, nie WAL. Checkpoint $C$ to koniec
+wszystkich rekordów odwzorowanych w segmentach; replay $(a,p)$ wskazuje
+koniec ostatniej z nich w zachowanym pliku-kotwicy, również przy $p=$EOF:
 \[
-  checkpoint\_lsn = base\_lsn + (replay.offset-32)
+ C=base\_lsn+(replay.offset-32).
 \]
-i wskazywać granicę pełnego rekordu lub początek pustego strumienia.
+Kursor musi być granicą pełnej ramki lub początkiem pustego strumienia.
 
-Manifest zawiera cały katalog i granice zamknięcia z chwili zamrożenia
-head. Nie dołącza późniejszych szeregów ani stanów aktywnych bloków;
-ich definicje i próbki znajdują się w późniejszych rekordach WAL.
-Tablice szeregów i segmentów są uporządkowane rosnąco po ID i generacji.
-Nazwy segmentów są pojedynczymi komponentami ścieżki bez możliwości
-wyjścia z katalogu. CRC wpisu segmentu powtarza końcowe CRC pliku.
-JSON nie wymaga konkretnej kolejności pól; sumę liczy się z zapisanych
-bajtów, a liczniki dekoduje jako liczby całkowite, bez pośredniego f64.
+Katalog i $S_s$ pochodzą z chwili freeze, bez późniejszych TS/active
+(ich definicje i próbki są w WAL). Tablice są rosnące po ID/generacji;
+nazwa segmentu to pojedynczy komponent ścieżki, bez wyjścia z katalogu.
+CRC wpisu jest końcowym CRC pliku. Pola JSON mogą mieć dowolną kolejność:
+CRC obejmuje zapisane bajty, a liczniki dekoduje się całkowitoliczbowo,
+bez f64.
 
-Początkowy manifest ma generację i checkpoint równe 0,
-\code{replay: {"segment_id": 1, "offset": 32}},
-\code{next_series_id = 1} i puste tablice.
-Nie przechowuje numeru następnej ramki: następny LSN wynika z końca
-odtworzonego strumienia bajtów.
-Po replay licznik ID przekracza wszystkie identyfikatory z katalogu
-i późniejszych rekordów. GC i aliasowanie ID nie należą do MVP.
-
-Walidacja sprawdza wersję, CRC, kursor, rozmiary i sumy segmentów,
-rosnące generacje zrzutów, brak powtórzonych identyfikatorów
-i rozłączność zakresów bloków danego szeregu.
-\code{sealed_through} odpowiada największemu czasowi szeregu
-w opublikowanych segmentach. Każdy szereg katalogu ma co najmniej
-jeden blok; przed replay odtwarza się $H_s=S_s$.
+Początek: generation=0, $C=0$, replay=(1,32), next\_series\_id=1,
+puste tablice. Następny LSN wynika z końca replay, ID przekracza wszystkie
+widziane identyfikatory; GC/aliasowanie poza MVP.
+Walidacja: wersja, CRC, kursor, rozmiary/sumy segmentów, rosnące generacje,
+unikalne ID i rozłączne zakresy bloków TS. Każdy TS katalogu ma blok;
+\code{sealed_through} to jego największy czas na dysku, przed replay
+$H_s=S_s$.
 
 \subsection{Indeksy w pamięci i plan odczytu}
-TSMap korzysta z mapy \code{SeriesKey -> Arc<TS>} i wektora uchwytów TS.
-Indeks odwrócony przechowuje uporządkowane identyfikatory dla nazwy
-metryki i każdej pary etykiety. Wybór szeregu zaczyna się od listy
-metryki, następnie przecina listy wymaganych etykiet i sprawdza pełny
-klucz. Matcher z pustą wartością wybiera brak etykiety; nie wymaga
-przechowywania pustych etykiet w indeksie.
+TSMap (rys.~\ref{fig:classes}) używa odwróconych, uporządkowanych list ID
+dla metryki i par etykiet. Wybór zaczyna od metryki, przecina listy
+matcherów i sprawdza pełny klucz. Pusty matcher wybiera brak etykiety;
+pustych wartości nie trzeba indeksować.
 
-W stanie każdego TS znajdują się uporządkowane deskryptory
-bloków: segment, min/max, offset i liczba próbek. Z reguły
-$t>S_s$ wynika, że zakresy kolejnych bloków tego samego szeregu nie
-nakładają się. Przeszukanie deskryptorów eliminuje segmenty spoza zakresu,
-a wyszukiwanie binarne wybiera próbki w pozostałych blokach.
-
-Odtworzenie indeksów nie wymaga relacyjnej bazy ani odrębnego serwera.
-Koszt pamięci katalogu zależy od liczby szeregów, długości etykiet
-i liczby segmentów, nie tylko od liczby próbek. Brak kompaktowania
-oznacza narastanie liczby deskryptorów przy długim działaniu.
+Deskryptory TS zawierają segment, min/max, offset i liczbę punktów.
+Reguła $t>S_s$ zapewnia rozłączne zakresy: deskryptory eliminują zbędne
+segmenty, binarne wyszukiwanie wybiera wycinki próbek.
+Indeksy odbudowuje silnik, bez zewnętrznej bazy. Ich RAM zależy
+od liczby TS, długości etykiet i segmentów; bez kompaktowania
+liczba deskryptorów rośnie.
 
 \section{Checkpoint i odzyskiwanie po awarii}
 \label{sec:checkpoint}
 
 \subsection{Trwałe opublikowanie generacji}
-Generacja head $g$ i numer pliku WAL są niezależne.
-Checkpoint powstaje przez krótkie zamrożenie head i utrwalenie w tle.
-W jednym momencie działa najwyżej jeden flush danych.
+Generacja head $g$ i numer WAL są niezależne. Działa najwyżej jeden
+flush danych. Kolejność publikacji jest następująca:
 
-\textbf{Bariera zamrożenia head:}
-\begin{enumerate}
-\item Wstrzymać rozpoczynanie części pamięciowych zapisów i uzyskać
-wyłączną barierę. Poczekać, aż rozpoczęte zadania zakończą
-enqueue i head append. Klienci oczekujący na Written lub Synced
-nie utrzymują bariery i nie opóźniają tego kroku.
-\item Odczytać $C=enqueued\_end$. Wszystkie rekordy do $C$ są już
-zastosowane w head. Samo written\_end albo synced\_end nie wystarczyłoby:
-rekord może trafić na dysk przed zakończeniem publikacji jego TS.
-\item Zapamiętać katalog i następny ID. Pod blokadami TS przenieść
-aktywne wektory do zamrożonych bloków generacji $g$, zaktualizować
-$S_s$ i zainicjalizować aktywne bloki $g+1$.
-\item Zwolnić barierę. Nowe żądania przyjmują pozycje WAL większe od $C$
-i zapisują do nowych aktywnych bloków. Nie rotować pliku WAL
-ani nie wykonywać synchronizacji w tej sekcji.
-\end{enumerate}
+\begin{longtable}{P{27mm}P{129mm}}
+\tabhead{Faza & Operacje w kolejności}
+Bariera head &
+Uzyskać wyłączną barierę, wstrzymując nowe części pamięciowe.
+Dokończyć rozpoczęte enqueue--head append (bez czekania na waiterów).
+Ustalić $C=enqueued\_end$: wszystkie ramki do $C$ są już w head;
+sam Written/Synced tego nie gwarantuje. Zapamiętać katalog i następny ID.
+Pod blokadami TS przenieść aktywne wektory do frozen $g$, podnieść $S_s$
+i utworzyć active $g+1$. Zwolnić barierę: nowe zapisy mają LSN $>C$.
+Bez sync i rotacji WAL.\\
+Segment w tle &
+Zapisać \code{segments/segment-<g>.bin.tmp} z cutoff $C$;
+sync pliku $\rightarrow$ rename $\rightarrow$ sync katalogu segments/.\\
+Kotwica WAL &
+Poza blokadami TS wykonać \code{wal.wait_for(C, Synced)}, również
+dla danych None. Trwała kotwica to plik $a$ z ostatnią ramką do $C$
+i fizyczny koniec $p$.\\
+Manifest &
+Zapisać/synchronizować \code{MANIFEST.tmp}: segmenty, katalog
+\emph{z chwili zamrożenia}, $g$, $C$, replay $(a,p)$.
+Atomowo zastąpić MANIFEST i sync katalogu danych.
+To punkt publikacji checkpointu.\\
+Podmiana head &
+Pod krótkimi blokadami TS zastąpić frozen $g$ deskryptorami dyskowymi.
+Nie zmieniać nowszych active, $H_s$, last\_lsn.
+ReadView zachowują stare uchwyty.\\
+Sprzątanie &
+Usunąć wyłącznie WAL o ID $<a$, zamknięte (potwierdza flusher)
+i z końcem $\leq C$; zachować kotwicę $a$, wszystkie późniejsze
+i aktywny plik. Sync wal/, zwolnić własne uchwyty RAM, zakończyć flush.\\
+\end{longtable}
 
-\textbf{Utrwalanie poza barierą i blokadami TS:}
-\begin{enumerate}
-\item Zapisać \code{segments/segment-<g>.bin.tmp} z cutoff $C$,
-zsynchronizować plik, zmienić nazwę na docelową i zsynchronizować
-katalog \code{segments/}.
-\item Wywołać \code{wal.wait_for(C, Synced)}. To oczekiwanie dotyczy
-zadania checkpointu, nie blokuje TS. Zapewnia trwałą obecność
-pozycji wznowienia WAL, także gdy część paczek miała tryb None.
-Odszukać plik $a$ zawierający ostatnią ramkę do $C$ i jej fizyczny koniec $p$.
-\item Zapisać i zsynchronizować \code{MANIFEST.tmp} ze spisem segmentów,
-katalogiem z chwili zamrożenia, generacją $g$, checkpointem $C$
-i kursorem \code{replay = (a,p)}.
-Atomowo zastąpić manifest i zsynchronizować katalog danych.
-Dopiero wtedy checkpoint jest opublikowany.
-\item Pod krótką blokadą każdego TS podmienić zamrożony blok $g$
-na deskryptor dyskowy. Nie nadpisywać aktywnych próbek, $H_s$
-ani last\_lsn z nowszych żądań. Istniejące ReadView zachowują swoje uchwyty.
-\item Usunąć wyłącznie zamknięte WAL o numerach mniejszych od $a$,
-których ostatni LSN jest $\leq C$. Zachować plik-kotwicę $a$,
-wszystkie późniejsze i plik aktywny. Flusher potwierdza status
-zamknięcia; nie usuwa się pliku, do którego może jeszcze dopisać.
-Zsynchronizować katalog WAL, zwolnić własne uchwyty RAM i zakończyć flush.
-\end{enumerate}
-
-Zachowanie kotwicy upraszcza replay: nawet gdy $p$ wypada na końcu
-pliku, pozostaje jednoznaczna pozycja wznowienia.
-Kosztem jest pozostawienie jednego dodatkowego pliku do następnego
-checkpointu. Nie trzeba kopiować ani obcinać początku aktywnego WAL.
+Kotwica pozostaje także przy $p=$EOF. Koszt jednego dodatkowego pliku
+eliminuje kopiowanie/obcinanie początku aktywnego WAL.
 
 \begin{figure}[htbp]
 \centering
@@ -1164,50 +1055,38 @@ fdatasync/fsync; nie obejmują fizycznego uszkodzenia nośnika.
 
 \subsection{Algorytm uruchomienia}
 \begin{enumerate}
-\item Sprawdzić konfigurację i uzyskać wyłączną blokadę katalogu.
-Gotowość pozostaje fałszywa do zakończenia recovery.
-\item W pustym katalogu utworzyć i trwale opublikować WAL nr 1
-z base\_lsn równym 0, potem początkowy manifest z kursorem (1,32).
-Dokończenie przerwanej inicjalizacji jest dozwolone tylko dla
-poprawnego pustego WAL i braku danych oraz opublikowanych segmentów.
-Inny brak manifestu jest błędem, nie resetem bazy.
-\item Zweryfikować manifest i wskazane segmenty; odbudować TSMap
-i indeksy. Odtworzyć granice zamknięcia oraz katalog ID.
-Istniejące TS otrzymują początkowe last\_lsn równe checkpointowi;
-późniejsze rekordy replay aktualizują je własnym LSN.
-Nie dołączać automatycznie segmentów danych spoza manifestu.
-\item Odczytać kursor \code{replay = (a,p)} i checkpoint $C$.
-Plik $a$ musi istnieć; sprawdzić nagłówek, zakres $p$ i jego zgodność
-z bajtowym LSN $C$. Zebrać wszystkie opublikowane WAL od $a$
-do najwyższego $h$, bez luk w numerach.
-\item Od pozycji $p$ pliku $a$ czytać kolejne pełne rekordy,
-potem następne pliki od ich nagłówków. Sprawdzać długości, kind,
-flagi, CRC i ciągłość pozycji: base\_lsn następnego pliku
-odpowiada końcowi logicznemu poprzedniego.
-Stare bajty przed kursorem są pokryte checkpointem i nie są replayowane.
-\item Każdy rekord zastosować w całości: najpierw definicje szeregów,
-potem próbki. Brak definicji lub ponowne zdefiniowanie klucza pod
-innym ID jest błędem. Nie ma GC, aliasowania ID ani cichego pomijania.
-Po replay licznik ID przekracza wszystkie zaobserwowane identyfikatory.
-\item Niepełny końcowy nagłówek ramki lub payload można odciąć
-wyłącznie w ostatnim WAL $h$. Pełna ramka z błędnym CRC,
-nieznany kind, luka lub uszkodzenie wcześniejszego pliku zatrzymuje start.
-\item Zsynchronizować naprawiony i odtworzony aktywny plik przed
-ogłoszeniem gotowości. Ustawić enqueued\_end, written\_end i synced\_end
-na koniec odtworzonego strumienia; starsze zamknięte pliki były
-synchronizowane przy rotacji. Otworzyć wyłącznie WAL $h$ do dopisywania,
-a odtworzone próbki umieścić w aktywnych blokach generacji head $g+1$.
-\item Po udanej walidacji usunąć pliki tymczasowe, nieopublikowane
-segmenty danych i zbędne WAL sprzed kotwicy. Zachować wszystkie
-pliki od $a$ wzwyż, dopóki kolejny checkpoint nie przesunie kursora.
-Uruchomić flusher i syncer, ogłosić gotowość.
+\item Sprawdzić konfigurację i uzyskać LOCK; ready=false do końca recovery.
+Pustą bazę inicjalizować trwale: WAL 1 z base=0, potem manifest
+z kursorem (1,32). Przerwaną inicjalizację wolno dokończyć tylko
+przy poprawnym pustym WAL, bez danych i opublikowanych segmentów.
+Inny brak manifestu oznacza błąd, bez resetu.
+\item Zweryfikować manifest i jego segmenty; odbudować TSMap,
+indeksy, ID, granice zamknięcia. Początkowo \code{last_lsn=C}.
+Segmentów spoza manifestu nie dołączać.
+\item Z kursora $(a,p)$ sprawdzić istnienie kotwicy, nagłówek,
+offset i zgodność z $C$; zebrać WAL $a,\ldots,h$ bez luk.
+Czytać od $p$, kolejne pliki od ich nagłówków. Kontrolować długości,
+kind, flagi, CRC i ciągłość base\_lsn z końcem poprzednika.
+Bajty przed kursorem pokrywa checkpoint.
+\item Każdą ramkę zastosować w całości: definicje przed próbkami;
+zaktualizować last\_lsn. Nieznany ID lub ten sam klucz pod innym ID
+jest błędem, bez GC, aliasów i pomijania.
+Następny ID musi przekraczać wszystkie zaobserwowane.
+\item Obciąć można tylko niepełny nagłówek ramki/payload na końcu
+ostatniego WAL $h$. Pełna ramka z błędnym CRC, nieznany kind,
+luka i uszkodzenie wcześniejszego pliku zatrzymują start.
+\item Zsynchronizować odtworzony/naprawiony plik $h$; wszystkie trzy
+granice WAL ustawić na koniec replay (starsze pliki zsynchronizowano
+przy rotacji). Tylko $h$ otworzyć do dopisywania.
+Odtworzone próbki umieścić w active generacji $g+1$.
+\item Po poprawnej walidacji usunąć .tmp, sieroty segmentów i zbędne
+WAL sprzed kotwicy; zachować $a,\ldots,h$ do kolejnego checkpointu.
+Uruchomić flusher/syncer i ogłosić gotowość.
 \end{enumerate}
 
-Replay nie stosuje ponownie walidacji względem aktualnego zegara,
-zmienionego okna out-of-order ani limitu dopuszczalnego opóźnienia.
-Nie odrzuca w ten sposób wcześniejszych zapisów.
-Pierwotny czas przebywania w RAM nie jest utrwalany; odzyskane próbki
-kwalifikują się od razu do zrzutu czasowego.
+Replay nie ponawia testów bieżącego zegara ani zmienionego $W$,
+więc nie odrzuca dawnych zapisów. Nie utrwala się pierwotnego pobytu
+w RAM: odzyskane próbki od razu kwalifikują się do czasowego flush.
 Za mały nowy limit pamięci zatrzymuje start z opisem problemu.
 
 \begin{figure}[htbp]
@@ -1223,7 +1102,7 @@ Za mały nowy limit pamięci zatrzymuje start z opisem problemu.
 \node[box,text width=36mm] (trim) at (6.5,-5.2)
   {Obcięcie ogona\\synchronizacja};
 \node[box,text width=45mm] (ready) at (0,-7.1)
-  {Start flushera i syncera\\gotowość};
+  {Sync aktywnego WAL\\start wątków, gotowość};
 \node[box,text width=36mm,fill=white] (fail) at (6.5,-1.7)
   {Przerwanie startu\\raport błędu};
 \draw[arrow] (lock) -- (check);
@@ -1271,28 +1150,41 @@ Granice zamknięcia z nieopublikowanego zrzutu mogą po restarcie wrócić
 do poprzedniego checkpointu; nie narusza to gwarancji Written/Synced.
 
 \subsection{Cykl życia procesu}
-Proces przechodzi przez inicjalizację, recovery, gotowość i zamykanie.
-Błąd flush danych może pozostawić proces z fałszywą gotowością
-i dostępnym odczytem; błąd I/O WAL kończy działanie.
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\node[state] (init) at (0,0) {Inicjalizacja\\i recovery};
+\node[state] (ready) at (4.8,0) {Gotowy\\readyz=200};
+\node[state] (drain) at (9.6,0) {Zamykanie\\readyz=503};
+\node[state] (ro) at (4.8,-2) {Odczyt dostępny\\readyz=503};
+\node[state,fill=white] (stop) at (9.6,-2) {Proces\\zatrzymany};
+\draw[arrow] (init) -- node[note,above]{walidacja OK} (ready);
+\draw[arrow] (ready) -- node[note,above]{SIGTERM} (drain);
+\draw[arrow] (ready) -- node[note,left]{błąd flush\\danych} (ro);
+\draw[arrow] (ro) -- (stop);
+\draw[arrow] (drain) -- node[note,right]{WAL Synced\\lub timeout} (stop);
+\draw[arrow] (ready.south east) -- node[note,sloped,above]
+  {I/O WAL: fail-stop} (stop.north west);
+\end{tikzpicture}
+\caption{Diagram stanów procesu. Błąd startu kończy proces bez gotowości;
+ze stanu ograniczonego odczytu operator może wykonać restart/zamknięcie.}
+\label{fig:lifecycle}
+\end{figure}
 
-Po SIGTERM serwer zamyka przyjęcia, kończy części pamięciowe zadań,
-wyznacza końcowy enqueued\_end i wymusza zapis oraz synchronizację
-całego bufora WAL, także rekordów None.
-Dopiero potem zatrzymuje flusher i syncer.
-Kończy albo bezpiecznie przerywa zadanie flush danych bez usuwania
-plików potrzebnych do replay. Pełny flush head nie jest wymagany.
-Limit 30 s może zakończyć się wymuszonym zatrzymaniem; wówczas
-obowiązują zwykłe gwarancje wybranych poziomów trwałości.
+SIGTERM zamyka przyjęcia i kończy pamięciowe części zadań, następnie
+wymusza Written i Synced do końcowego enqueued\_end, również dla None.
+Dopiero potem zatrzymuje wątki WAL. Flush danych kończy lub bezpiecznie
+przerywa, zachowując pliki replay; pełny flush head nie jest wymagany.
+Po 30 s możliwe jest wymuszone zatrzymanie i zwykłe gwarancje
+wybranego trybu trwałości.
 
 \section{Język i wykonywanie zapytań}
 \label{sec:language}
 
 \subsection{Obsługiwana składnia}
-Podstawowy podzbiór obejmuje nazwany selektor z dokładnymi matcherami
-oraz pojedynczą funkcję agregującą próbki jednego szeregu w czasie.
-W celu obsługi prostych prób połączenia źródła danych dodaje się
-wyrażenie skalarne, np. \code{1+1}. Nie rozszerza to zakresu operacji
-między szeregami. Docelowa gramatyka ma postać:
+Obsługiwany jest nazwany selektor z dokładnymi matcherami, jedna funkcja
+czasowa na szereg oraz skalar (np. 1+1 do próby połączenia).
+Gramatyka:
 
 \begin{lstlisting}
 expr       = selector | function "(" selector "[" duration "]" ")"
@@ -1306,15 +1198,12 @@ unit       = "ms" | "s" | "m" | "h" | "d" | "w" ;
 scalar     = number [ "+" number ] ;
 \end{lstlisting}
 
-Nazwy mają składnię z sekcji~\ref{sec:model}. Napisy w podwójnych
-cudzysłowach korzystają z escape'ów JSON. Liczba skalarna ma składnię
-liczby JSON i musi reprezentować skończone \code{f64}. Białe znaki
-między tokenami są ignorowane. Parser musi zużyć całe wejście.
-Powtórzony matcher tej samej etykiety jest błędem. Nazw etykiet
-z prefiksem \code{__} nie dopuszcza się w matcherach tej wersji.
-Nazwę metryki podaje się bezpośrednio.
+Nazwy: sekcja~\ref{sec:model}; napisy w podwójnych cudzysłowach
+z escape JSON; number to skończone f64 o składni JSON.
+Whitespace między tokenami jest ignorowany, parser zużywa całe wejście.
+Powtórzony matcher i etykieta z prefiksem \code{__} są błędem;
+nazwę metryki podaje się wprost. Maksimum tekstu: 16 KiB.
 
-Przykłady:
 \begin{lstlisting}
 temperature_celsius
 temperature_celsius{service="api",instance="1"}
@@ -1323,81 +1212,52 @@ count_over_time(temperature_celsius[30s])
 1+1
 \end{lstlisting}
 
-Odrzucane są regexy, matchery inne niż \code{=}, selektory bez nazwy
-metryki, samodzielne wektory zakresowe, podzapytania, \code{offset},
-\code{@}, zagnieżdżone funkcje i agregacje między szeregami.
-Przykładowo \code{sum(temperature_celsius)} nie oznacza sumy próbek
-w czasie i kończy się błędem nieobsługiwanej konstrukcji.
-Maksymalna długość tekstu zapytania wynosi 16 KiB.
-
-Parser tworzy AST przez analizę tokenów i rekursywny zstępujący parser
-tej niewielkiej gramatyki. Nie jest potrzebny generator pełnego PromQL.
-Walidacja semantyczna sprawdza nazwy, dodatnie i mieszczące się w zakresie
-okno oraz obsługiwany typ wyniku. Błąd zawiera offset bajtowy wejścia
-i czytelny opis.
+Odrzucane: regex, matchery inne niż =, selektor bez nazwy,
+samodzielny range vector, podzapytania, offset, @, zagnieżdżenia
+i agregacje między TS (np. \code{sum(temperature_celsius)}).
+Tokenizator i parser rekurencyjny tworzą AST, bez generatora pełnego
+PromQL. Walidacja sprawdza nazwy, dodatnie/mieszczące się okno i typ
+wyniku; błąd zawiera offset bajtowy i opis.
 
 \subsection{Czas obliczenia i wybór próbek}
-Zapytanie chwilowe oblicza wyrażenie dla jednego czasu $T$.
-Zakresowe oblicza je dla:
+Instant oblicza wyrażenie w $T$, range na siatce
 \[
- T_k = start + k\cdot step,\qquad
- k=0,\ldots,\left\lfloor\frac{end-start}{step}\right\rfloor .
+ T_k=start+k\cdot step,\qquad
+ k=0,\ldots,\left\lfloor(end-start)/step\right\rfloor .
 \]
-Krok jest dodatni, $start\leq end$; koniec jest uwzględniony tylko wtedy,
-gdy wypada na siatce. Obliczenia używają całkowitych milisekund
-i sprawdzanej arytmetyki.
+Wymagania: $step>0$, $start\leq end$, sprawdzana arytmetyka całkowitych
+milisekund. Koniec wchodzi do wyniku tylko na siatce.
 
-Dla samego selektora wybiera się najnowszą próbkę o czasie
-$t\leq T$ oraz $t\geq T-D$, gdzie $D$ to lookback, domyślnie 5 min.
-Jeżeli jej nie ma, szereg nie wnosi elementu wyniku. To wybór ostatniego
-pomiaru, nie interpolacja ani średnia. Timestamp w odpowiedzi wektora
-jest czasem obliczenia $T$, a nie oryginalnym czasem próbki.
-Nie implementuje się specjalnych znaczników staleness.
+\begin{longtable}{P{29mm}P{127mm}}
+\tabhead{Wyrażenie & Semantyka dla każdego pasującego szeregu}
+Selektor &
+Najnowsza próbka w $[T-D,T]$, domyślnie $D=5$ min (lookback).
+Bez interpolacji, agregacji i markerów staleness; brak próbki pomija TS.
+Timestamp wyniku to $T$, nie czas pomiaru; zachowuje \code{__name__}.\\
+Funkcja z $R$ &
+Okno $(T-R,T]$: lewa granica wykluczona, prawa włączona
+\cite{prom-basics}; lookback nie ogranicza okna.
+Zachowuje etykiety, usuwa nazwę metryki. Puste okno pomija TS
+dla wszystkich funkcji, także count (brak danych nie oznacza zera).\\
+\code{avg_over_time} & Średnia arytmetyczna, równa waga próbek.\\
+\code{min_over_time}, \code{max_over_time} & Minimum / maksimum.\\
+\code{sum_over_time} & Suma w chronologicznym porządku.\\
+\code{count_over_time} & Liczba próbek jako wartość liczbowa.\\
+\end{longtable}
 
-Funkcja z oknem $R$ bierze próbki z przedziału
-\[
-  (T-R,\;T].
-\]
-Próbka na lewej granicy jest wykluczona, na prawej włączona.
-Takie granice i powtarzanie obliczenia w krokach są zgodne z modelem
-zapytań Prometheusa \cite{prom-basics}. Lookback selektora nie ogranicza
-okna funkcji. Dla każdego pasującego szeregu oblicza się osobny wynik.
+Funkcje dotyczą próbek liczbowych \cite{prom-functions}.
+Obliczenia f64 używają sumowania kompensowanego; średnia = suma/liczność.
+Przy przepełnieniu sumy średnią przelicza się ze składników $x_i/n$.
+NaN i nieskończoności wyników koduje się jako napisy JSON.
 
-\begin{tabularx}{\linewidth}{P{43mm}Y}
-\toprule
-Funkcja & Wynik dla niepustego zbioru $x_1,\ldots,x_n$\\ \midrule
-\code{avg_over_time} & Średnia arytmetyczna; każda próbka ma tę samą wagę.\\
-\code{min_over_time} & Najmniejsza wartość.\\
-\code{max_over_time} & Największa wartość.\\
-\code{sum_over_time} & Suma wartości w rosnącym porządku czasu.\\
-\code{count_over_time} & Liczba próbek, zwracana jako wartość liczbowa.\\
-\bottomrule
-\end{tabularx}
-
-Dla pustego okna wszystkie pięć funkcji pomija szereg, również
-\code{count_over_time}; brak danych nie jest zerem.
-Agregacje zachowują etykiety źródłowego szeregu, ale usuwają nazwę metryki
-z zestawu etykiet wyniku. Selektor zachowuje \code{__name__}.
-Definicje funkcji są ograniczone do próbek liczbowych \cite{prom-functions}.
-Obliczenia korzystają z \code{f64} i sumowania kompensowanego.
-Średnia wynika z sumy i liczności; jeżeli suma się przepełnia,
-średnią przelicza się ze składników $x_i/n$, aby uniknąć przepełnienia
-samej sumy przy skończonej średniej.
-Wynik nieskończony lub NaN po przepełnieniu jest kodowany jako napis,
-a nie niepoprawna liczba JSON.
-
-\subsection{Przykład rozstrzygający granice}
-Niech szereg ma punkty $(0\,\mathrm{s},10)$, $(60\,\mathrm{s},20)$,
-$(120\,\mathrm{s},30)$ i $(180\,\mathrm{s},40)$.
+\textbf{Przykład granic:} punkty (czas w s, wartość):
+$(0,10),(60,20),(120,30),(180,40)$.
 Dla \code{avg_over_time(metric[2m])}:
-\begin{itemize}
-\item w chwili 120 s okno $(0,120]$ obejmuje 20 i 30, wynik wynosi 25;
-\item w chwili 180 s okno $(60,180]$ obejmuje 30 i 40, wynik wynosi 35;
-\item w chwili 300 s okno $(180,300]$ jest puste, więc nie ma elementu.
-\end{itemize}
-Zapytanie zakresowe od 120 s do 190 s z krokiem 60 s oblicza wyrażenie
-tylko w 120 s i 180 s. Wynik nie zmienia się, jeśli część powyższych
-próbek przeniesiono do segmentu.
+$T=120\Rightarrow(0,120]\Rightarrow25$;
+$T=180\Rightarrow(60,180]\Rightarrow35$;
+$T=300\Rightarrow(180,300]\Rightarrow$ brak elementu.
+Zakres $[120,190]$, krok 60 s oblicza tylko 120 i 180.
+Przeniesienie próbek do segmentu nie zmienia wyniku.
 
 \subsection{Plan wykonania i limity pracy}
 \begin{figure}[htbp]
@@ -1418,50 +1278,36 @@ próbek przeniesiono do segmentu.
 \caption{Przepływ zapytania. Każdy etap może zakończyć się błędem lub przekroczeniem budżetu.}
 \end{figure}
 
-Plan wyznacza potrzebny przedział $[start-D,end]$ dla selektora
-albo $(start-R,end]$ dla funkcji. Granice są przycinane do dziedziny
-czasu bez przepełnienia. Potrzebne punkty aktywnych bloków są kopiowane
-jeden raz podczas tworzenia widoku; zamrożone bloki są współdzielone.
-Segmenty odczytywane są blokowo z buforem I/O 64 KiB.
-Agregacje korzystają z przesuwającego się okna: sumy i liczniki utrzymują
-stan, a minimum i maksimum kolejki monotoniczne. Nie odczytuje się
-tego samego całego zakresu od nowa dla każdego kroku.
-Po utracie skończoności stanu sumy odtwarza się go z próbek bieżącego
-okna, aby opuszczenie okna przez skrajną wartość nie zatruwało
-wszystkich następnych wyników.
+Plan pobiera $[start-D,end]$ dla selektora lub $(start-R,end]$ dla funkcji,
+z bezpiecznym przycięciem do dziedziny czasu. ReadView raz kopiuje
+potrzebne active, współdzieli frozen; dysk czyta blokowo (I/O 64 KiB).
+Przesuwane okno utrzymuje sumę/liczność, a min/max kolejki monotoniczne,
+bez ponownego odczytu całego zakresu w każdym kroku.
+Nieskończony stan sumy odbudowuje się z bieżącego okna, aby skrajna
+wartość po jego opuszczeniu nie zatruwała następnych wyników.
 
-Limity pojedynczego zapytania wynoszą: 1000 szeregów, 2 mln różnych
-próbek wejściowych, 1 mln punktów wyniku łącznie, 64 MiB pamięci roboczej
-i 30 s czasu. Metadane widoku, własne kopie aktywnych próbek,
-stan okien i wynik przed serializacją
-są rozliczane razem. Jeżeli limit nie wystarcza, zapytanie zwraca błąd
-bez częściowego wyniku. Dane na dysku można czytać strumieniowo,
-ale nadal obowiązuje limit próbek. Timeout jest sprawdzany również
-w pętlach obliczeń i odczytu; przerwanie klienta sygnalizuje anulowanie.
-Współdzielona pamięć zamrożonych bloków należy do globalnego budżetu
-bufora, także gdy podtrzymuje ją wyłącznie istniejący ReadView.
+Budżet zapytania: 1000 TS, 2 mln różnych wejściowych próbek,
+1 mln punktów wyniku łącznie, 64 MiB i 30 s. RAM obejmuje metadane widoku,
+kopie active, okna i wynik przed serializacją; wspólne frozen rozlicza
+globalny budżet head, także podtrzymywane tylko przez ReadView.
+Odczyt strumieniowy nie znosi limitu próbek.
+Przekroczenie oznacza błąd bez częściowego wyniku; timeout sprawdza się
+też w pętlach obliczeń/I/O, rozłączenie sygnalizuje anulowanie.
 
-Szeregi wyniku porządkuje się leksykograficznie po kluczu kanonicznym,
-a punkty wewnątrz szeregu chronologicznie. API zapisuje wartości
-\code{f64} jako napisy, timestampy zaś jako liczby sekund Unix.
-Wynik skalarny ma format pary czasu i wartości; dla zapytania zakresowego
-jest macierzą z jednym szeregiem o pustych etykietach.
+Wyniki są leksykograficzne po kanonicznym kluczu, punkty chronologiczne.
+Wartości f64 to napisy, timestampy liczby sekund Unix.
+Instant scalar to para czasu/wartości; range scalar to macierz jednego
+szeregu o pustych etykietach.
 
 \section{Komunikacja i publiczne API}
 \label{sec:http}
 
 \subsection{Transport i konwencje}
-Serwer udostępnia HTTP/1.1, kodowanie UTF-8 i JSON. Nie wymaga
-WebSocketów ani brokera wiadomości. Połączenia mogą być utrzymywane
-przez keep-alive. Żądania zapisu używają \code{application/json};
-odpowiedzi JSON mają ten sam typ. Nie implementuje się odbierania
-skomprymowanych żądań.
-
-API zapytań wykorzystuje nazwy endpointów, kopertę odpowiedzi oraz
-wektory i macierze Prometheusa \cite{prom-api}. Obsługa PromQL i endpointów
-jest ograniczona do poniższego profilu; nie deklaruje się pełnej
-implementacji serwera Prometheus. Własny endpoint zapisu nie jest
-Prometheus Remote Write ani formatem OpenMetrics.
+HTTP/1.1 z keep-alive, UTF-8, JSON \code{application/json};
+bez WebSocketów, brokera i skompresowanych żądań.
+Profil zapytań przejmuje endpointy, kopertę, wektory i macierze
+Prometheusa \cite{prom-api}; nie zapewnia pełnego PromQL/Prometheusa.
+Własny zapis nie jest Remote Write ani OpenMetrics.
 
 \subsection{Zapis pojedynczy i paczkowy}
 \code{POST /api/v1/write} przyjmuje dokładnie jeden z dwóch wariantów:
@@ -1515,27 +1361,17 @@ Content-Type: application/json
 
 {
   "status": "success",
-  "data": {
-    "inserted": 2, "duplicates": 0,
-    "lsn": 136, "durability": "written"
-  }
+  "data": {"inserted": 2, "duplicates": 0, "lsn": 136, "durability": "written"}
 }
 \end{lstlisting}
 
-\code{inserted + duplicates} jest liczbą punktów wejściowych.
-\code{lsn} jest końcem ramki, nie kolejnym numerem żądania.
-\code{durability} potwierdza wybrany i osiągnięty poziom.
-HTTP 200 przy None nie oznacza zapisu na dysk.
-Wszystkie tryby zapewniają widoczność całej paczki przed odpowiedzią.
-
-Konflikt, błędne dane i brak budżetu odrzucają całą paczkę przed enqueue.
-Po nim zerwanie połączenia, anulowanie lub timeout nie wycofuje head.
-Timeout oczekiwania daje 503 z \code{errorType: "timeout"} i oznacza
-niepewny wynik z punktu widzenia klienta. Rekord może osiągnąć
-Written lub Synced już po tej odpowiedzi.
-Dla samych duplikatów żądanie nadal czeka na wymagany poziom
-dla zwróconego LSN; nie potwierdza silniejszej trwałości samą
-obecnością próbki w head.
+\code{inserted + duplicates} = liczba punktów wejścia.
+LSN to koniec ramki; durability potwierdza osiągnięty tryb.
+Gwarancje określa sekcja~\ref{sec:wal-runtime}, a reguły duplikatów
+i atomowości sekcja~\ref{sec:model}.
+Przed enqueue błąd odrzuca całą paczkę; po enqueue timeout/anulowanie/
+utrata połączenia nie wycofują zmian. Timeout daje 503/timeout
+z niepewnym wynikiem: WAL może osiągnąć wymagany poziom później.
 
 \subsection{Zapytania chwilowe i zakresowe}
 Obsługiwane są metody GET oraz POST z
@@ -1576,11 +1412,7 @@ GET /api/v1/query?query=temperature_celsius&time=1792843201
     "resultType": "vector",
     "result": [
       {
-        "metric": {
-          "__name__": "temperature_celsius",
-          "service": "api",
-          "instance": "1"
-        },
+        "metric": {"__name__": "temperature_celsius", "service": "api", "instance": "1"},
         "value": [1792843201, "25.5"]
       }
     ]
@@ -1597,11 +1429,7 @@ do 1792843201 z krokiem 1 s:
     "resultType": "matrix",
     "result": [
       {
-        "metric": {
-          "__name__": "temperature_celsius",
-          "service": "api",
-          "instance": "1"
-        },
+        "metric": {"__name__": "temperature_celsius", "service": "api", "instance": "1"},
         "values": [[1792843200, "24.5"], [1792843201, "25.5"]]
       }
     ]
@@ -1698,52 +1526,38 @@ niepewność wyniku opisaną wcześniej.
 \label{sec:technology}
 
 \subsection{Wybór technologii}
-\begin{longtable}{P{28mm}P{38mm}P{32mm}P{58mm}}
-\tabhead{Obszar & Wybór & Alternatywy & Uzasadnienie i ograniczenia}
-Język & Rust, edycja 2024 & C++, Go & Kontrola reprezentacji danych
-i własności pamięci. Koszt nauki reguł własności; brak automatycznej
-ochrony przed nieograniczonymi alokacjami.\\
-HTTP i runtime & Axum 0.8, Tokio 1 & Actix Web, bezpośrednio Hyper &
-Routing, ekstraktory i integracja z Tokio \cite{axum}.
-Blokujące operacje plikowe trafiają poza wątki obsługi sieci.\\
-Serializacja & Serde 1, serde\_json 1 & Ręczny parser JSON &
-Wspólne DTO i walidacja typów. Osobno wykrywamy duplikaty kluczy
-i sprawdzamy własne limity.\\
-Czas i konfiguracja & time 0.3, Clap 4 & chrono, plik TOML &
-RFC 3339 w API i argumenty CLI. Jeden sposób konfiguracji
-nie wymaga dodatkowego schematu pliku.\\
-Przechowywanie & std::fs i własny kodek & RocksDB, SQLite &
-Własny silnik jest celem pracy. Format jawny i testowalny;
-większa odpowiedzialność za poprawność recovery.\\
-Współbieżność & Arc, RwLock, Mutex i kanały & Spinlocki, mapy bez blokad &
-Osobne TS, bariera head, bufor WAL i watch postępu.
-Część pamięciowa działa w puli, a oczekiwanie na trwałość asynchronicznie.\\
-Sumy i błędy & crc32fast 1, thiserror 2 & Ręczny CRC, błędy tekstowe &
-Gotowa implementacja CRC i typowane kategorie błędów bez własnego
-algorytmu sum kontrolnych.\\
-Diagnostyka & tracing 0.1, tracing-subscriber 0.3 &
-Własny logger & Ustrukturyzowane zdarzenia i pomiar czasu operacji;
-bez zapisywania pełnych treści pomiarów.\\
-Interfejs & Grafana OSS, profil 13.2.0 & Własny frontend &
-Wykresy, selektor czasu i provisioning \cite{grafana-provision}.
-Zakres zgodności trzeba sprawdzić z dokładnie tym obrazem.\\
-Wdrożenie & Docker Compose v2, Linux & Ręczna instalacja, Kubernetes &
-Jedna sieć, deklarowane usługi i trwałe wolumeny \cite{compose}.
-Orkiestrator klastra nie jest potrzebny.\\
-Testy & cargo test, Tower 0.5; generator w Rust &
-Zewnętrzny framework obciążeniowy &
-Testy modułowe i HTTP bez osobnego stosu technologicznego; generator
-korzysta z reqwest 0.12 i stałego ziarna losowania.\\
+\begin{longtable}{P{37mm}P{119mm}}
+\tabhead{Wybór & Uzasadnienie, alternatywy i ograniczenia}
+Rust 2024 & Kontrola danych i własności pamięci; zamiast C++/Go.
+Koszt nauki, konieczne własne limity alokacji.\\
+Axum 0.8, Tokio 1 & Routing, ekstraktory i runtime \cite{axum};
+alternatywy: Actix Web/Hyper. Blokujące I/O poza wątkami sieci.\\
+Serde 1, serde\_json 1 & Typowane DTO zamiast ręcznego JSON;
+własne limity i wykrywanie powtórzonych kluczy.\\
+time 0.3, Clap 4 & RFC 3339 i jeden sposób konfiguracji CLI;
+alternatywy: chrono/plik TOML.\\
+std::fs, własny kodek & Własny silnik jako cel projektu, jawne/testowalne
+formaty; zamiast RocksDB/SQLite, kosztem odpowiedzialności za recovery.\\
+Arc, RwLock, Mutex, kanały & Blokady TS, bariera head, WAL/watch;
+pula pamięciowa i async wait. Bez spinlocków i map lock-free.\\
+crc32fast 1, thiserror 2 & Gotowy CRC i typowane błędy zamiast własnego
+algorytmu i błędów tekstowych.\\
+tracing 0.1, tracing-subscriber 0.3 & Zdarzenia i czasy operacji
+zamiast własnego loggera; bez pełnych treści pomiarów.\\
+Grafana OSS 13.2.0 & Wykresy, wybór czasu i provisioning
+\cite{grafana-provision}; zamiast własnego GUI, zgodność do sprawdzenia.\\
+Compose v2, Linux & Sieć, usługi i wolumeny \cite{compose};
+zamiast ręcznej instalacji/Kubernetes, bez orkiestracji klastra.\\
+cargo test, Tower 0.5, generator Rust/reqwest 0.12 & Testy modułów,
+HTTP i obciążenia w jednym stosie, stałe ziarno generatora;
+zamiast zewnętrznego frameworka.\\
 \end{longtable}
 
-Numery bibliotek oznaczają wybrane linie zgodności, a nie polecenie
-aktualizacji istniejącego manifestu zależności. Dokładne wersje
-implementacji utrwala \code{Cargo.lock}, toolchain plik
-\code{rust-toolchain.toml}, a obraz Grafany jawny tag
-\code{grafana/grafana:13.2.0}. Przy przygotowaniu demo zapisuje się też
-digest obrazu. Dokument nie dodaje tych zależności ani środowiska do kodu.
-Docelowa walidacja odbywa się na Linux x86-64; inne systemy mogą korzystać
-z kontenerów linuksowych.
+To wybrane linie zgodności, bez zmiany zależności prototypu.
+Implementacja utrwala wersje w \code{Cargo.lock}, toolchain
+w \code{rust-toolchain.toml}; demo przypina
+\code{grafana/grafana:13.2.0} oraz zapisuje digest.
+Walidacja: Linux x86-64; inne systemy przez kontenery Linux.
 
 \subsection{Konfiguracja procesu}
 Źródłem konfiguracji są argumenty CLI; brak parametru oznacza wartość
@@ -1751,7 +1565,7 @@ domyślną. Compose przekazuje je jako tablicę \code{command}.
 Nie wprowadza się równoległych zmiennych środowiskowych dla tych samych
 ustawień. Zmiany wymagają restartu.
 
-\begin{longtable}{P{64mm}P{29mm}P{63mm}}
+\begin{longtable}{P{54mm}P{25mm}P{77mm}}
 \tabhead{Parametr & Domyślnie & Znaczenie i walidacja}
 \code{--listen} & \code{127.0.0.1:8080} &
 Adres HTTP; w kontenerze jawnie \code{0.0.0.0:8080}.\\
@@ -1810,29 +1624,20 @@ limit po restarcie, co zmienia założenia zużycia RAM.
 Wyłączenie limitu bufora nie wyłącza kontroli przepełnień ani błędów alokacji.
 
 \subsection{Sieć, trwałość i granica dostępu}
-Usługi \code{tsdb}, \code{grafana} i \code{generator} są w sieci
-\code{tsdb-net}. Grafana odwołuje się do \code{http://tsdb:8080},
-a generator zapisuje do tego samego adresu. Nie używają
-\code{localhost} do komunikacji między kontenerami.
-Na hosta publikowane są porty \code{127.0.0.1:3000:3000} i, na potrzeby
-testów HTTP, \code{127.0.0.1:8080:8080}.
+\label{sec:network}
+Topologię, porty, DNS i montowania pokazuje rys.~\ref{fig:deployment}.
+Publikacje Compose: \code{127.0.0.1:3000:3000}
+i \code{127.0.0.1:8080:8080}.
+Baza działa bez root z prawem zapisu do własnego wolumenu.
+Grafana wymaga logowania; hasło administratora dostaje przez nieśledzony
+plik środowiskowy. API v1 nie ma auth/TLS: granicą jest lokalny host
+i zaufana sieć demo; wyjście poza nią wymaga osobnej warstwy dostępu.
+Przeglądarka nie łączy się z TSDB, więc CORS nie jest potrzebny.
 
-Wolumen \code{tsdb-data} jest montowany w \code{/var/lib/tsdb}.
-Konfiguracja źródła Grafany w YAML i dashboard w JSON są montowane
-tylko do odczytu. Baza działa jako użytkownik bez uprawnień root
-z prawem zapisu do własnego wolumenu. Grafana wymaga logowania;
-hasło administratora przekazywane jest przy uruchomieniu przez
-nieśledzony plik środowiskowy.
-
-Własne API v1 nie realizuje uwierzytelniania ani TLS: granicą dostępu
-jest lokalny host i zaufana sieć demonstracyjna. Udostępnienie poza nią
-wymaga osobnej decyzji wdrożeniowej i warstwy dostępowej.
-Przeglądarka nie łączy się z TSDB, więc integracja nie wymaga CORS.
-
-Compose sprawdza \code{/readyz} przed uruchomieniem generatora.
-Po restarcie bazy generator ponawia połączenia, a Grafana odzyskuje odczyt
-pod tym samym adresem. Zatrzymanie kontenerów zachowuje wolumen;
-jego usunięcie jest osobną, świadomą operacją operatora.
+Compose czeka na \code{/readyz} przed startem generatora.
+Po restarcie generator ponawia połączenie, Grafana odzyskuje odczyt
+pod stałym adresem. Zatrzymanie kontenerów zachowuje wolumen;
+jego usunięcie jest osobną operacją operatora.
 
 \subsection{Diagnostyka}
 Logi zawierają identyfikator żądania, endpoint, wynik, czas obsługi,
@@ -2000,106 +1805,82 @@ T-16--20 i P-06: przyczynowość definicji, rotacja, checkpoint i błędy I/O.\\
 
 \subsection{Scenariusze poprawności}
 \begin{description}[style=multiline,leftmargin=16mm,font=\bfseries]
-\item[T-01:] Zapis pojedynczy, wieloszeregowa paczka i 10\,000 punktów.
-Odczyt po odpowiedzi widzi całość. Błąd jednego punktu oznacza brak
-zmian w próbkach i publicznym katalogu; niewidoczne luki ID są dopuszczalne.
-\item[T-02:] Zamieniona kolejność etykiet daje ten sam szereg; zmieniona
-wartość daje inny. Puste etykiety są usuwane. Powtórzone klucze JSON
-i zastrzeżone nazwy są odrzucane.
-\item[T-03:] Restart z danymi tylko w WAL, z historią w segmentach
-i pustym aktywnym WAL oraz ze stanem mieszanym.
-Sprawdzenie próbek, etykiet, kolejnych identyfikatorów i granic zamknięcia.
-\item[T-04:] Zapytania chwilowe i zakresowe: $start=end$, zerowy krok,
-odwrócony zakres, końcowy punkt poza siatką, próbka dokładnie na
-granicy lookback, kilka szeregów i brak danych.
-\item[T-05:] Parser: każda funkcja, escape'y napisów, białe znaki, skalar
-\code{1+1}, błędna jednostka, trailing input, regex i nieobsługiwana funkcja.
-\item[T-06:] Dane z ręcznie policzonymi wynikami, puste okno, granice $(T-R,T]$,
-skrajne skończone wartości i wynik nieskończony. Porównanie RAM,
-segmentu i mieszanego widoku. Wyniki f64 sprawdzane z tolerancją
-$10^{-9}\max(1,|wynik_{\mathrm{ref}}|)$.
-\item[T-07:] Uruchomienie ustalonego obrazu Grafany, provisioning i rzeczywiste
-żądania wszystkich paneli. Zmiana serwisu i czasu, przerwa danych,
-restart bazy oraz próba połączenia źródła.
-\item[T-08:] Flush czasowy i pamięciowy, także przy aktywnych odczytach.
-Odczyt widzi próbkę raz; zrzut nie robi pełnej kopii RAM.
-Za mały limit na pojedynczą paczkę nie wywołuje pętli flush.
-\item[T-09:] Czasy na granicy $H-W$ i $S$, po obu stronach granic,
-duplikaty zgodne i konfliktowe. Ponowna walidacja po wymuszonym flush.
-Replay po zmianie konfiguracji nie odrzuca potwierdzonych punktów.
-\item[T-10:] Co najmniej 20 awarii procesu w każdym z trybów Written
-i Synced, z osobnym dziennikiem potwierdzeń klienta.
-Awarie w środku ramki, po write i sync, przy rename segmentu i manifestu,
-przed i po rotacji WAL oraz usunięciu plików sprzed kotwicy.
-Każda potwierdzona paczka Written/Synced musi wrócić.
-None i paczki bez odpowiedzi mogą być obecne w całości albo nieobecne.
-\item[T-11:] Błędne typy, NaN w wejściu, zbyt duże ciało, nieznane parametry,
-pełna kolejka, zajęty semafor zapytań oraz timeout oczekiwania na WAL.
-Sprawdzenie kodu, opisu błędu i możliwości dalszej diagnostyki procesu.
-\item[T-12:] Co najmniej dwa zadania zapisu rozłącznych TS.
-Wstrzymać syncer i pozostawić klienta Synced w oczekiwaniu po publikacji.
-Inny zapis None, także do tego samego TS, i odczyt mają móc się zakończyć.
-Dla tego samego TS
-konkurujące duplikaty i konflikty muszą dać wynik zgodny z ustaloną
-kolejnością, bez utraty próbek.
-\item[T-13:] Dwie paczki blokujące te same TS podane w odwrotnej
-kolejności wejścia nie zakleszczają się. Odczyt kilku TS widzi całą
-paczkę albo stan sprzed niej. Równoległa rejestracja tego samego klucza
-tworzy jeden TS; zmiana wersji katalogu podczas tworzenia widoku
-wymusza ponowienie wyboru.
-\item[T-14:] Wstrzymać zadanie flush po rotacji, przed trwałym segmentem.
-Potwierdzić nowe zapisy do aktywnych bloków i odczytać dane obu generacji.
-Po publikacji segmentu wynik pozostaje taki sam, a WAL nowych zapisów
-nie zostaje usunięty. Powtórzyć restart przed i po publikacji manifestu,
-również z nowym szeregiem zarejestrowanym podczas flush.
-\item[T-15:] Powolny flush, aktywny bufor bliski limitu i ReadView
-podtrzymujący stary blok po publikacji segmentu.
-Pamięć pozostaje rozliczona do ostatniego uchwytu. Przeciążenie daje 503
-przed enqueue, nie tworzy kolejnych zamrożonych generacji i nie blokuje
-operacji zwalniających miejsce.
-\item[T-16:] Kontrolowane zatrzymanie flushera i checkpointu:
-None odpowiada, a Written i Synced czekają mimo widoczności head.
-Po write kończy się Written, po fdatasync Synced.
-Próba awarii przed write dopuszcza utratę None.
-Ponowienie identycznej próbki None z Synced musi naprawdę czekać na sync.
-\item[T-17:] Wstrzymać rejestrację szeregu przed enqueue definicji.
-Konkurent nie może wcześniej zalogować jego próbek.
-Po zwolnieniu rejestracji potwierdzić drugi zapis jako Synced,
-zrestartować proces i odczytać definicję oraz oba punkty.
-Rekord z nieznanym ID zatrzymuje replay, nie zwiększa licznika pominięć.
-\item[T-18:] Zatrzymać syncer po zapamiętaniu celu, dopisać późniejsze
-rekordy i zakończyć pierwszą synchronizację. synced\_end może potwierdzić
-tylko zapamiętany prefiks. Powtórzyć przy rotacji pliku, krótkim write,
-anulowaniu i rejestracji waitera po wcześniejszym postępie watch.
-\item[T-19:] Rekord jest w WAL, ale jego head append jest wstrzymany:
-bariera checkpointu ma czekać na publikację, nie na optional wait.
-Kursor w środku pliku i dokładnie na końcu pliku daje poprawny replay.
-Sprawdzić utrzymanie kotwicy, aktywnego pliku i rekordów po $C$.
-Wiele rotacji WAL bez flush oraz wiele flush bez rotacji WAL
-nie zmienia wyniku odczytu.
-\item[T-20:] Wypełnić budżet aktywnego i przejętego bufora WAL.
-Odrzucenie następuje przed enqueue, bez częściowej paczki i bez
-nieograniczonej kolejki. Zasymulowany błąd write/fdatasync kończy proces
-bez sukcesu nieosiągniętych Written/Synced; wcześniej potwierdzone
-dane pozostają odtwarzalne przy sprawnym nośniku testowym.
+\item[T-01:] Jeden punkt, paczka wieloszeregowa i 10\,000 punktów:
+odczyt po sukcesie widzi całość. Błędny punkt nie zmienia próbek/katalogu;
+niewidoczne luki ID dozwolone.
+\item[T-02:] Kolejność etykiet nie zmienia TS, ich wartość zmienia.
+Puste są usuwane; powtórzone klucze JSON i nazwy zastrzeżone odrzucane;
+kolizja hash nie utożsamia różnych kluczy.
+\item[T-03:] Restart z samym WAL, samymi segmentami i pustym active WAL
+oraz stanem mieszanym; zgodne próbki, etykiety, następne ID i $S_s$.
+\item[T-04:] Instant/range: start=end, krok=0, odwrócony zakres,
+koniec poza siatką, dokładna granica lookback, wiele TS i brak danych.
+\item[T-05:] Parser: wszystkie funkcje, escape, whitespace, 1+1;
+błędna jednostka, trailing input, regex i nieobsługiwana funkcja.
+\item[T-06:] Ręcznie obliczone wyniki, puste i brzegowe okno $(T-R,T]$,
+skrajne skończone wejścia/nieskończony wynik; RAM, dysk i mieszany widok
+dają to samo z tolerancją $10^{-9}\max(1,|wynik_{\mathrm{ref}}|)$.
+\item[T-07:] Przypięta Grafana: provisioning, żądania wszystkich paneli,
+wybór serwisu/czasu, przerwa danych, restart i test połączenia.
+\item[T-08:] Flush czasowy/pamięciowy podczas odczytu: próbka raz,
+bez pełnej kopii RAM; za mały budżet paczki bez pętli flush.
+\item[T-09:] Równość i obie strony $H-W$, $S$, duplikaty/konflikty;
+ponowna walidacja po flush. Replay po zmianie konfiguracji zachowuje dane.
+\item[T-10:] $\geq20$ awarii procesu \emph{w każdym} Written/Synced,
+osobny dziennik potwierdzeń klienta. Awarie: środek ramki, po write/sync,
+rename segmentu/manifestu, przed/po rotacji WAL i usunięciu starych plików.
+Każda potwierdzona paczka wraca; None i paczka bez odpowiedzi
+mogą wrócić w całości lub być nieobecne.
+\item[T-11:] Błędne typy, NaN, za duże ciało, nieznane parametry,
+pełne przyjęcia, zajęte zapytania, timeout WAL:
+właściwy kod/opis i nadal dostępna diagnostyka.
+\item[T-12:] $\geq2$ zapisy rozłącznych TS. Zatrzymać syncer po publikacji
+Synced: inny None (także do tego TS) i odczyt mogą się zakończyć.
+Konkurencyjne duplikaty/konflikty wspólnego TS mają ustaloną kolejność,
+bez utraty próbek.
+\item[T-13:] Paczki tych samych TS w odwrotnej kolejności wejścia
+nie zakleszczają się; odczyt widzi całość albo stan sprzed paczki.
+Równoległa rejestracja klucza tworzy jeden TS; zmiana wersji katalogu
+w trakcie snapshot wymusza ponowienie wyboru.
+\item[T-14:] Wstrzymać flush po freeze, przed trwałym segmentem:
+nowe zapisy działają, obie generacje są czytelne, publikacja nie zmienia
+wyniku i nie usuwa nowego WAL. Restart przed/po manifeście,
+również z nowym TS zarejestrowanym podczas flush.
+\item[T-15:] Wolny flush, active bliski limitu, ReadView podtrzymuje
+stary blok po publikacji: pamięć rozliczona do ostatniego uchwytu;
+503 przed enqueue, bez kolejnych frozen i blokowania zwalniania RAM.
+\item[T-16:] Zatrzymać flusher/checkpoint: None odpowiada,
+Written/Synced czekają mimo widoczności head. Write zwalnia Written,
+fdatasync Synced; awaria przed write może utracić None.
+Ponowienie duplikatu None jako Synced rzeczywiście czeka.
+\item[T-17:] Wstrzymać rejestrację przed enqueue definicji: konkurent
+nie zaloguje jej próbek wcześniej. Po zwolnieniu drugi zapis Synced,
+restart: definicja i oba punkty wracają. Nieznany ID zatrzymuje replay.
+\item[T-18:] Syncer zapamiętuje cel, potem dopisano nowsze ramki:
+pierwszy sync potwierdza tylko cel. Powtórzyć przy rotacji, krótkim write,
+anulowaniu i rejestracji waitera po wcześniejszej zmianie watch.
+\item[T-19:] WAL gotowy, head append wstrzymany: checkpoint czeka
+na publikację, bez czekania na optional wait. Replay ze środka/EOF,
+kotwica, active i LSN $>C$ zachowane. Wiele rotacji bez flush i wiele
+flush bez rotacji nie zmienia odczytu.
+\item[T-20:] Pełny aktywny/przejęty bufor WAL: odrzucenie przed enqueue,
+bez części paczki i nieograniczonej kolejki. Błąd write/fdatasync kończy
+proces, bez fałszywego sukcesu; wcześniejsze potwierdzenia wracają
+przy sprawnym nośniku testowym.
 \end{description}
 
-Testy kodeków obejmują znane sekwencje bajtów, poprawne długości i CRC,
-każdy możliwy punkt ucięcia małej ramki, nadmierne liczniki, offset poza
-plikiem, uszkodzony nagłówek i pełną ramkę z błędnym CRC. Ostatni przypadek
-ma zatrzymać start, a nie być uznany za niepełny ogon.
-Scenariusze współbieżne wykorzystują bariery testowe do wymuszenia
-konkretnych przeplotów operacji. Sprawdzają również ciągłość LSN
-między plikami, pusty nowy WAL, niepełny ogon wyłącznie ostatniego pliku
-oraz odtwarzanie po kursorze bajtowym przy niezależnych generacjach head.
+Kodeki: znane bajty/długości/CRC, każde ucięcie małej ramki, nadmierne
+liczniki, offset poza plikiem, uszkodzony nagłówek i pełna ramka z błędnym
+CRC (ostatnia zatrzymuje start). Bariery testowe wymuszają przeploty;
+sprawdza się też ciągłość LSN między plikami, pusty nowy WAL,
+niepełny ogon tylko ostatniego pliku i replay po kursorze bajtowym
+przy niezależnych generacjach head.
 
 \subsection{Profil pomiarów wydajności i zasobów}
-Wyniki są raportowane dla konkretnego sprzętu: model CPU, liczba rdzeni,
-RAM, typ dysku i system plików, wersja systemu, toolchain, commit,
-ustawienia bazy oraz współbieżność klienta. Profil referencyjny:
-Linux x86-64, co najmniej 4 rdzenie, 8 GiB RAM, lokalny SSD,
-kompilacja release, bez innego obciążenia dysku.
-Podanie tych parametrów umożliwia interpretację wyników; nie zastępuje pomiaru.
+Raport podaje CPU/rdzenie, RAM, dysk/system plików, OS, toolchain,
+commit, konfigurację i współbieżność klienta. Referencja:
+Linux x86-64, $\geq4$ rdzenie, 8 GiB RAM, lokalny SSD bez innego
+obciążenia, build release; parametry nie zastępują pomiaru.
 
 \begin{longtable}{P{20mm}P{73mm}P{63mm}}
 \tabhead{Test & Przebieg & Cel z lab1}
@@ -2134,29 +1915,19 @@ Raportować p95, przepustowość i bajty oczekujące oddzielnie;
 None nie zalicza kryterium trwałej przepustowości.\\
 \end{longtable}
 
-Dla P-01 zapytanie selektora obejmuje jeden szereg i 1000 chwil co 1 s;
-generator dostarcza próbki co 1 s. Agregacja obejmuje jeden szereg,
-okno 5 min i tę samą siatkę; potrzebny zakres jest w RAM.
-Dla P-02 i P-03 generator dostarcza po 10 punktów/s na każdy z 1000
-szeregów. Etykiety mają najwyżej cztery krótkie pary. Bazowy profil ma
-0\% out-of-order; dodatkowe przebiegi mają 1\% i 10\% opóźnionych próbek
-z opóźnieniem do 5 min. Odrzucenia po zamknięciu zakresu są raportowane,
-a nie zaliczane do przepustowości.
+P-01: selektor jednego TS, 1000 chwil co 1 s i próbki co 1 s;
+agregacja tego TS, okno 5 min, ta sama siatka, potrzebne dane w RAM.
+P-02/03: 1000 TS po 10 punktów/s, najwyżej cztery krótkie etykiety;
+bazowo 0\% out-of-order, dodatkowo 1\%/10\% z opóźnieniem do 5 min.
+Odrzuceń po zamknięciu nie wlicza się do przepustowości.
 
-Przy 10\,000 punktów/s i 30 min powstaje:
-\[
-  10\,000\cdot1800=18\,000\,000\ \text{punktów},\qquad
-  18\,000\,000\cdot16=288\,000\,000\ \text{B}\approx274{,}7\ \text{MiB}.
-\]
-Do tego dochodzi zapas pojemności, jednoczesna obecność bloków aktywnych
-i zamrożonych, uchwyty odczytów, metadane, kolejka, przygotowane WAL,
-obsługa HTTP i budżety zapytań. Domyślne 512 MiB bufora pozostawia
-margines do celu RSS, ale \textbf{nie dowodzi} jego spełnienia.
-Nie wolno utożsamiać limitu bufora z limitem całego procesu.
-Wydajność wspólnego WAL, czas oczekiwania na blokady TS i długość bariery
-rotacji wymagają pomiaru. Osobno raportuje się czas dyskowego flush,
-który nie jest już globalną pauzą zapisu.
-Jeśli cel nie zostanie osiągnięty, raport pokazuje wynik i wąskie gardło.
+Surowe próbki z 30 min: $10\,000\cdot1800=18$ mln,
+$18\,000\,000\cdot16=288\,000\,000$ B $\approx274{,}7$ MiB.
+Dochodzi zapas pojemności, active/frozen, uchwyty, metadane, przyjęcia,
+scratch, HTTP i zapytania. Limit head 512 MiB daje margines,
+\textbf{nie dowodzi RSS $\leq1$ GiB}. Mierzy się też wspólny WAL,
+oczekiwanie na TS, barierę i osobno dyskowy flush (bez globalnej pauzy).
+Nieosiągnięty cel raportuje się z wynikiem i wąskim gardłem.
 
 \subsection{Ryzyka i warunki akceptacji projektu}
 \begin{longtable}{P{37mm}P{61mm}P{58mm}}
@@ -2188,37 +1959,28 @@ i pomiarów; niniejszy dokument nie oznacza ich zaliczenia.
 
 \appendix
 \section{Słownik}
-\begin{longtable}{P{36mm}P{120mm}}
+\begin{longtable}{P{32mm}P{124mm}}
 \tabhead{Pojęcie & Znaczenie}
-WAL & Rekord jest włączany do uporządkowanego bufora przed zmianą head;
-moment trwałego zapisu zależy od wybranego trybu.\\
-LSN & Koniec ramki w logicznym strumieniu bajtów WAL, bez nagłówków plików.\\
-Head & Katalog i próbki w pamięci, obejmujące aktywne i zamrożone bloki TS.\\
-Flusher & Przenosi bufory WAL do systemu operacyjnego i publikuje written\_end.\\
-Syncer & Synchronizuje zapisany prefiks WAL i publikuje synced\_end.\\
-TSMap & Jeden katalog kluczy i uchwytów TS, z indeksem etykiet.\\
-TS & Stan jednego szeregu, chroniony własną blokadą, z blokiem aktywnym
-i referencjami do danych zamrożonych i dyskowych.\\
-Generacja & Próbki head wspólnie zamrażane do jednego zrzutu.
-Numeracja jest niezależna od plików WAL.\\
-Segment & Niezmienny plik próbek i indeksów utworzony przez flush.\\
-Manifest & Trwały spis opublikowanych segmentów, katalog szeregów
-i checkpoint.\\
-Checkpoint & Największy LSN, którego wszystkie dane znajdują się
-w segmentach wskazanych przez manifest.\\
-Zamrożenie head & Krótka bariera kończąca części pamięciowe zapisów
-i wyznaczająca granicę checkpointu.\\
-Rotacja WAL & Zamknięcie pełnego pliku i otwarcie następnego,
-niezależne od zamrażania head.\\
-Kotwica replay & Zachowany plik WAL i offset, od których recovery
-wznawia odtwarzanie po checkpoint.\\
-Flush & Zapis zamrożonej generacji do segmentu i publikacja manifestu w tle.\\
-Out-of-order & Przyjęcie próbki starszej niż najnowsza próbka danego szeregu.\\
-Granica zamknięcia & Czas $S_s$; nowe próbki muszą mieć czas większy
-od tej granicy.\\
-Lookback & Maksymalny wiek próbki wybieranej przez selektor chwilowy.\\
-Provisioning & Deklaratywne dostarczenie źródła danych i dashboardu Grafany.\\
-RSS & Pamięć rezydentna procesu; obejmuje więcej niż surowe próbki bufora.\\
+Head / TSMap / TS & Pamięciowy katalog i aktywne/zamrożone próbki /
+jeden katalog kluczy i uchwytów z indeksem etykiet /
+szereg z osobną blokadą, active i referencjami do frozen/dysku.\\
+WAL / LSN & Uporządkowany bufor przed zmianą head, trwałość zależna
+od trybu / koniec ramki w strumieniu bajtów bez nagłówków plików.\\
+Flusher / Syncer & Zapisuje bufor do OS i publikuje Written /
+synchronizuje prefiks i publikuje Synced.\\
+Generacja / Segment & Próbki wspólnie zamrażane (numer niezależny od WAL) /
+niezmienny plik próbek i indeksów powstały przez flush.\\
+Manifest / Checkpoint & Spis opublikowanych segmentów, katalog i checkpoint /
+największy LSN, którego wszystkie dane są w tych segmentach.\\
+Zamrożenie / Flush & Krótka bariera kończąca pamięciowe części zapisów /
+zapis frozen do segmentu i publikacja manifestu w tle.\\
+Rotacja WAL / Kotwica & Zamknięcie pełnego pliku i otwarcie następnego,
+niezależnie od head / zachowany plik i offset wznowienia replay.\\
+Out-of-order / $S_s$ & Próbka starsza od najnowszej /
+granica zamknięcia: nowy czas musi być większy.\\
+Lookback / Provisioning / RSS & Maksymalny wiek próbki selektora /
+deklaratywne źródło i dashboard Grafany / rezydentna pamięć procesu,
+szersza niż surowe próbki.\\
 \end{longtable}
 
 \section{Budowanie dokumentu}
@@ -2241,7 +2003,7 @@ oraz czytelność tabel i diagramów.
 \small
 \begin{thebibliography}{15}
 \raggedright
-\setlength{\itemsep}{0.25em}
+\setlength{\itemsep}{0pt}
 \addcontentsline{toc}{section}{Źródła}
 \bibitem{lab1}
 H. Błonowski, J. Zaborski,
@@ -2294,10 +2056,10 @@ Linux man-pages, \emph{sync\_file\_range(2)},
 Projekt Tokio, \emph{tokio::sync::watch},
 \url{https://docs.rs/tokio/latest/tokio/sync/watch/index.html}.
 \end{thebibliography}
-\endgroup
 \noindent Dokumentację zewnętrzną sprawdzono 24.10.2026.
 Zachowanie własnego silnika określa niniejsza specyfikacja; odnośniki
 \emph{latest} służą jako kontekst, a zgodność integracji sprawdza się
 z przypiętymi wersjami używanymi w demonstracji.
+\endgroup
 
 \end{document}
