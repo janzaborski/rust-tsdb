@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
+use tsdb::storage::wal::{Durability, WalConfig};
 use tsdb::{Db, router};
 
 #[derive(Parser)]
@@ -14,6 +15,12 @@ struct Args {
 
     #[arg(long, default_value_t = 10_000)]
     max_buffer_samples: usize,
+
+    #[arg(long)]
+    wal_dir: Option<PathBuf>,
+
+    #[arg(long, default_value = "none", value_parser = parse_durability)]
+    durability: Durability,
 }
 
 #[tokio::main]
@@ -21,7 +28,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
-    let db = Arc::new(Db::open(&args.data_dir, args.max_buffer_samples)?);
+    let wal_dir = args.wal_dir.unwrap_or_else(|| args.data_dir.join("wal"));
+
+    let db = Arc::new(Db::open_with(
+        &args.data_dir,
+        args.max_buffer_samples,
+        WalConfig::new(wal_dir),
+        args.durability,
+    )?);
     let app = router(db.clone());
 
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
@@ -31,6 +45,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     db.flush()?;
     Ok(())
+}
+
+fn parse_durability(s: &str) -> Result<Durability, String> {
+    match s {
+        "none" => Ok(Durability::None),
+        "written" => Ok(Durability::Written),
+        _ => Err(format!(
+            "unknown durability {s:?} (expected none or written)"
+        )),
+    }
 }
 
 async fn shutdown_signal() {
