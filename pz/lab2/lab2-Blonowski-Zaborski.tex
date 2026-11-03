@@ -76,7 +76,7 @@ szeregów czasowych\\w języku Rust\par}
 \begin{tabular}{rl}
 Autorzy: & Hubert Błonowski\\ & Jan Zaborski\\[.5em]
 Promotor: & mgr inż. Paweł Sobótka\\[.5em]
-Wersja dokumentu: & 1.6\\
+Wersja dokumentu: & 1.7\\
 Data: & 3 listopada 2026 r.
 \end{tabular}
 \vfill
@@ -108,6 +108,8 @@ Dostosowanie do WAL-a z 23-wal-improvements.\\
 Wersja do oceny; szczegóły implementacyjne w osobnym dokumencie.\\
 1.6 & 03.11.2026 & H. Błonowski,\newline J. Zaborski &
 Ujednolicenie nazw typów, pól, metod i tras HTTP z kodem.\\
+1.7 & 03.11.2026 & H. Błonowski,\newline J. Zaborski &
+Usunięcie narzędzi i scenariusza demonstracyjnego z opisu projektu.\\
 \bottomrule
 \end{tabularx}
 \par
@@ -128,7 +130,7 @@ Ujednolicenie nazw typów, pól, metod i tras HTTP z kodem.\\
 Celem jest własny silnik do przyjmowania pomiarów, przechowywania historii
 i wykonywania agregacji czasowych. Użytkownik analizuje dane w Grafanie.
 Zakres z lab1 \cite{lab1} obejmuje HTTP, etykiety, pięć agregacji,
-out-of-order w otwartym buforze oraz demonstrację w Docker Compose.
+out-of-order w otwartym buforze oraz wdrożenie w Docker Compose.
 
 System jest modularnym monolitem na jednym węźle. Jeden Index kataloguje
 szeregi Series, każdy z osobną blokadą; projekt nie wymaga shardów.
@@ -179,40 +181,33 @@ mechanizmem silnika, a nie osobnym działaniem użytkownika.}
 \section{Architektura i odpowiedzialności modułów}
 \label{sec:architecture}
 Przeglądarka komunikuje się z Grafaną; jej serwer odpytuje TSDB.
-Generator przesyła pomiary bezpośrednio do bazy. Serwer Prometheus
+Pomiary są przyjmowane przez API HTTP. Serwer Prometheus
 nie jest potrzebny. Silnik korzysta z lokalnego systemu plików.
 
 \begin{figure}[!htbp]
 \centering
 \begin{tikzpicture}[font=\small]
-\draw[draw=accent,thick,fill=black!1] (0,0) rectangle (14,-9.1);
+\draw[draw=accent,thick,fill=black!1] (0,0) rectangle (14,-7.7);
 \node[anchor=north west,align=left] at (.2,-.15)
   {\textit{<<device>>} Host Linux x86-64};
 \node[external,text width=40mm] (browser) at (3,-1.45)
   {Przeglądarka\\Grafana UI};
-\node[external,text width=40mm] (curl) at (10,-1.45)
-  {Klient testowy\\HTTP / curl};
-\draw[draw=black!50,dashed] (.5,-2.8) rectangle (13.5,-6.9);
+\draw[draw=black!50,dashed] (.5,-2.8) rectangle (13.5,-5.5);
 \node[anchor=north,font=\scriptsize,align=center] at (7,-2.95)
   {\textit{<<executionEnvironment>>}\\Docker Compose, sieć tsdb-net};
 \node[box,text width=38mm] (grafana) at (3,-4.4)
   {\textit{<<container>>}\\grafana :3000};
 \node[box,text width=42mm] (db) at (10,-4.4)
   {\textit{<<container>>}\\tsdb / Rust :8080};
-\node[box,text width=38mm] (gen) at (3,-6.1)
-  {\textit{<<container>>}\\generator};
-\node[external,text width=42mm] (config) at (3,-8.2)
+\node[external,text width=42mm] (config) at (3,-6.8)
   {\textit{<<artifact>>}\\YAML źródła + JSON dashboardu};
-\node[external,text width=42mm] (data) at (10,-8.2)
+\node[external,text width=42mm] (data) at (10,-6.8)
   {Wolumen tsdb-data\\\code{/var/lib/tsdb}};
 \draw[assoc] (browser) -- node[note,right]{HTTP\\127.0.0.1:3000} (grafana);
-\draw[assoc] (curl) -- node[note,right]{HTTP\\127.0.0.1:8080} (db);
 \draw[assoc] (grafana) -- node[note,above]{HTTP / JSON\\http://tsdb:8080} (db);
-\draw[assoc] (gen.east) -- node[note,above]{HTTP JSON: POST /api/v1/write\_json}
-  (10,-6.1) -- (db.south);
 \draw[assoc] (db.south east) -- (11.2,-5.4) --
-  node[note,right]{lokalne I/O} (11.2,-7.5) -- (data.north east);
-\draw[assoc] (config.west) -- (.7,-8.2) |-
+  node[note,right]{lokalne I/O} (11.2,-6.1) -- (data.north east);
+\draw[assoc] (config.west) -- (.7,-6.8) |-
   node[note,pos=.6,left]{mount\\read-only} (grafana.west);
 \end{tikzpicture}
 \caption{Wdrożenie na jednym hoście. Kontenery używają DNS tsdb,
@@ -620,18 +615,18 @@ zamiast RocksDB/SQLite, kosztem odpowiedzialności za recovery.\\
 thiserror 2, tracing 0.1 & Typowane błędy i logi; zamiast własnego stosu.\\
 Grafana OSS 13.2.0, Compose v2 & Gotowe wykresy i powtarzalne środowisko;
 zamiast własnego GUI/Kubernetes.\\
-cargo test, Tower 0.5, reqwest 0.12 & Testy modułów/HTTP i generator
-w Rust, bez osobnego frameworka obciążeniowego.\\
+cargo test, Tower 0.5 & Testy modułów i HTTP
+w Rust.\\
 \bottomrule
 \end{tabularx}
 
 Wersje utrwala Cargo.lock, obraz Grafany jest przypięty.
 Platforma docelowa: Linux x86-64 i lokalny system plików
 z rename oraz sync plików/katalogów \cite{linux-sync}.
-LOCK dopuszcza jeden proces na katalog. Usługi tsdb/grafana/generator
+LOCK dopuszcza jeden proces na katalog. Usługi tsdb i grafana
 korzystają z sieci tsdb-net i wolumenu tsdb-data.
 Grafana odpytuje \code{http://tsdb:8080}; przeglądarka korzysta
-z portu 3000. API testowe 8080 i Grafana są publikowane na loopback.
+z portu 3000. API na porcie 8080 i Grafana są publikowane na loopback.
 Baza działa bez root; API ufa lokalnej sieci, bez auth/TLS.
 Grafana ma logowanie, a sekret jest poza repozytorium.
 
@@ -658,7 +653,7 @@ Limity head nie są limitem RSS całego procesu.
 Logi obejmują request ID, wynik, czas, LSN/tryb, backlog,
 generację/checkpoint, cut/flush oraz raport recovery.
 
-\subsection{Dashboard i demonstracja}
+\subsection{Dashboard Grafany}
 \label{sec:ui}
 Grafana jest jedynym GUI. Provisioning \cite{grafana-provision}
 dostarcza źródło Prometheus (proxy, POST, UID tsdb) i dashboard.
@@ -697,10 +692,6 @@ count\_over\_time z 1 min. Zmienna jest typu Custom bez All/multiselect,
 a zapytania w trybie Code, aby nie wymagać regexów i pełnego PromQL.
 Brak danych jest przerwą/No data, błąd API pozostaje błędem panelu.
 
-Demo: uruchomienie generatorów po readyz, zmiana serwisu/czasu,
-odczyt podczas flush oraz restart z zachowaniem wolumenu.
-Profil pokazowy skraca bufor do 1 min i opóźnienie do 30 s;
-testy zasobów zachowują profil lab1.
 
 \section{Weryfikacja, ryzyka i podział pracy}
 \label{sec:verification}

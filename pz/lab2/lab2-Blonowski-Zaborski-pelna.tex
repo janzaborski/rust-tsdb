@@ -76,7 +76,7 @@ szeregów czasowych\\w języku Rust\par}
 Autorzy: & Hubert Błonowski\\
          & Jan Zaborski\\[0.5em]
 Promotor: & mgr inż. Paweł Sobótka\\[0.5em]
-Wersja dokumentu: & 1.6\\
+Wersja dokumentu: & 1.7\\
 Data: & 3 listopada 2026 r.
 \end{tabular}
 \vfill
@@ -116,6 +116,8 @@ WAL z brancha 23-wal-improvements; dostosowanie head, checkpointu,
 recovery, formatów i API.\\
 1.6 & 03.11.2026 & H. Błonowski,\newline J. Zaborski &
 Ujednolicenie nazw typów, pól, metod i tras HTTP z kodem.\\
+1.7 & 03.11.2026 & H. Błonowski,\newline J. Zaborski &
+Usunięcie narzędzi i scenariusza demonstracyjnego z opisu projektu.\\
 \bottomrule
 \end{tabularx}
 \par
@@ -141,8 +143,8 @@ promotora i recenzenta określa zachowanie docelowe; przykłady i cele
 wydajnościowe nie są wynikami prototypu.
 
 Zakres: jednowęzłowy silnik Rust, HTTP, dokładne dopasowanie etykiet,
-pięć agregacji czasowych i demonstracja w Compose. Grafana i generatory
-są klientami zewnętrznymi. Poza zakresem pozostają klaster, replikacja,
+pięć agregacji czasowych i wdrożenie w Compose. Grafana
+jest klientem zewnętrznym. Poza zakresem pozostają klaster, replikacja,
 kompresja, retencja, kompaktowanie, alertowanie, pobieranie
 \code{/metrics} i własny frontend. Dane rosną do usunięcia środowiska;
 kopia zapasowa wymaga zatrzymania bazy i skopiowania całego katalogu.
@@ -255,40 +257,33 @@ mechanizmem silnika, a nie osobnym działaniem użytkownika.}
 
 \subsection{Wdrożenie i granice procesów}
 System działa na jednym komputerze. Przeglądarka łączy się z Grafaną;
-serwer Grafany odpytuje TSDB, a generator wysyła HTTP JSON.
+serwer Grafany odpytuje TSDB. Pomiary są przyjmowane przez API HTTP.
 W środowisku nie ma serwera Prometheus.
 
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[font=\small]
-\draw[draw=accent,thick,fill=black!1] (0,0) rectangle (14,-9.1);
+\draw[draw=accent,thick,fill=black!1] (0,0) rectangle (14,-7.7);
 \node[anchor=north west,align=left] at (.2,-.15)
   {\textit{<<device>>} Host Linux x86-64};
 \node[external,text width=40mm] (browser) at (3,-1.45)
   {Przeglądarka\\Grafana UI};
-\node[external,text width=40mm] (curl) at (10,-1.45)
-  {Klient testowy\\HTTP / curl};
-\draw[draw=black!50,dashed] (.5,-2.8) rectangle (13.5,-6.9);
+\draw[draw=black!50,dashed] (.5,-2.8) rectangle (13.5,-5.5);
 \node[anchor=north,font=\scriptsize,align=center] at (7,-2.95)
   {\textit{<<executionEnvironment>>}\\Docker Compose, sieć tsdb-net};
 \node[box,text width=38mm] (grafana) at (3,-4.4)
   {\textit{<<container>>}\\grafana :3000};
 \node[box,text width=42mm] (db) at (10,-4.4)
   {\textit{<<container>>}\\tsdb / Rust :8080};
-\node[box,text width=38mm] (gen) at (3,-6.1)
-  {\textit{<<container>>}\\generator};
-\node[external,text width=42mm] (config) at (3,-8.2)
+\node[external,text width=42mm] (config) at (3,-6.8)
   {\textit{<<artifact>>}\\YAML źródła + JSON dashboardu};
-\node[external,text width=42mm] (data) at (10,-8.2)
+\node[external,text width=42mm] (data) at (10,-6.8)
   {Wolumen tsdb-data\\\code{/var/lib/tsdb}};
 \draw[assoc] (browser) -- node[note,right]{HTTP\\127.0.0.1:3000} (grafana);
-\draw[assoc] (curl) -- node[note,right]{HTTP\\127.0.0.1:8080} (db);
 \draw[assoc] (grafana) -- node[note,above]{HTTP / JSON\\http://tsdb:8080} (db);
-\draw[assoc] (gen.east) -- node[note,above]{HTTP JSON: POST /api/v1/write\_json}
-  (10,-6.1) -- (db.south);
 \draw[assoc] (db.south east) -- (11.2,-5.4) --
-  node[note,right]{lokalne I/O} (11.2,-7.5) -- (data.north east);
-\draw[assoc] (config.west) -- (.7,-8.2) |-
+  node[note,right]{lokalne I/O} (11.2,-6.1) -- (data.north east);
+\draw[assoc] (config.west) -- (.7,-6.8) |-
   node[note,pos=.6,left]{mount\\read-only} (grafana.west);
 \end{tikzpicture}
 \caption{Diagram wdrożenia UML z zasobami lokalnymi.
@@ -1573,10 +1568,6 @@ choć nie zajmują już one miejsca w puli części pamięciowej.
 Zapytania korzystają z osobnego semafora dwóch miejsc, również bez
 nieograniczonego oczekiwania.
 
-Generator ponawia 503 z wykładniczym opóźnieniem od 1 s do 30 s
-i losowym odchyleniem. Nie ponawia automatycznie błędów walidacji,
-konfliktu i zamkniętego zakresu. Po błędzie połączenia dopuszcza
-niepewność wyniku opisaną wcześniej.
 
 \section{Technologie, konfiguracja i środowisko}
 \label{sec:technology}
@@ -1604,14 +1595,13 @@ Grafana OSS 13.2.0 & Wykresy, wybór czasu i provisioning
 \cite{grafana-provision}; zamiast własnego GUI, zgodność do sprawdzenia.\\
 Compose v2, Linux & Sieć, usługi i wolumeny \cite{compose};
 zamiast ręcznej instalacji/Kubernetes, bez orkiestracji klastra.\\
-cargo test, Tower 0.5, generator Rust/reqwest 0.12 & Testy modułów,
-HTTP i obciążenia w jednym stosie, stałe ziarno generatora;
+cargo test, Tower 0.5 & Testy modułów i HTTP w jednym stosie;
 zamiast zewnętrznego frameworka.\\
 \end{longtable}
 
 To wybrane linie zgodności, bez zmiany zależności prototypu.
 Implementacja utrwala wersje w \code{Cargo.lock}, toolchain
-w \code{rust-toolchain.toml}; demo przypina
+w \code{rust-toolchain.toml}; konfiguracja wdrożenia przypina
 \code{grafana/grafana:13.2.0} oraz zapisuje digest.
 Walidacja: Linux x86-64; inne systemy przez kontenery Linux.
 
@@ -1697,12 +1687,10 @@ i \code{127.0.0.1:8080:8080}.
 Baza działa bez root z prawem zapisu do własnego wolumenu.
 Grafana wymaga logowania; hasło administratora dostaje przez nieśledzony
 plik środowiskowy. API v1 nie ma auth/TLS: granicą jest lokalny host
-i zaufana sieć demo; wyjście poza nią wymaga osobnej warstwy dostępu.
+i zaufana sieć wdrożenia; wyjście poza nią wymaga osobnej warstwy dostępu.
 Przeglądarka nie łączy się z TSDB, więc CORS nie jest potrzebny.
 
-Compose czeka na \code{/readyz} przed startem generatora.
-Po restarcie generator ponawia połączenie, Grafana odzyskuje odczyt
-pod stałym adresem. Zatrzymanie kontenerów zachowuje wolumen;
+Po restarcie Grafana odzyskuje odczyt pod stałym adresem bazy. Zatrzymanie kontenerów zachowuje wolumen;
 jego usunięcie jest osobną operacją operatora.
 
 \subsection{Diagnostyka}
@@ -1718,14 +1706,14 @@ backlog\_bytes, waiterzy, write, fdatasync, writeback, pauza cut,
 kolejka i flush. Syncer nie udostępnia granicy synced.
 Liczniki mogą trafiać okresowo do logów, bez dodatkowego systemu monitoringu.
 
-\section{Wizja interfejsu użytkownika i demonstracja}
+\section{Wizja interfejsu użytkownika}
 \label{sec:ui}
 
 \subsection{Dashboard Grafany}
 Dashboard ,,TSDB -- telemetria serwisów'' zawiera wybór jednego serwisu,
 selektor czasu, automatyczne odświeżanie co 5 s i cztery panele.
 Początkowy zakres to ostatnie 15 min, strefa wyświetlania UTC.
-Źródła generatora mają etykiety \code{service} i \code{instance};
+Przykładowe szeregi mają etykiety \code{service} i \code{instance};
 różne instancje są osobnymi liniami na wykresie.
 
 \begin{figure}[htbp]
@@ -1783,7 +1771,7 @@ licznikiem wszystkich szeregów ani agregacją między instancjami.
 \subsection{Profil standardowego źródła Prometheus}
 Provisioning ustawia stały UID, adres bazy i metodę POST.
 Poniższy fragment jest projektowaną konfiguracją do użycia podczas
-implementacji demo; znaczenie ustawień źródła wynika z dokumentacji
+wdrożenia; znaczenie ustawień źródła wynika z dokumentacji
 Grafany \cite{grafana-source}.
 \begin{lstlisting}
 apiVersion: 1
@@ -1811,26 +1799,6 @@ i funkcje edytora wymagające nieobsługiwanych endpointów.
 Provisioning dashboardu wskazuje katalog plików JSON i UID \code{tsdb}.
 Brakującą funkcję Grafany weryfikuje się na przypiętym obrazie,
 bez deklarowania zgodności ze wszystkimi wersjami.
-
-\subsection{Scenariusz demonstracji}
-\begin{enumerate}
-\item Uruchomić Compose z pustym lub istniejącym wolumenem. Poczekać
-na gotowość bazy i uruchomienie generatorów.
-\item Generatory \code{api} i \code{worker} wysyłają co sekundę temperaturę
-dwóch instancji. Jeden profil celowo wprowadza opóźnione punkty.
-\item Otworzyć dashboard, zmienić serwis i zakres czasu; porównać
-pomiary z agregacjami i liczbą próbek.
-\item W profilu demonstracyjnym skrócić buforowanie do 1 min,
-a okno opóźnienia do 30 s. Pokazać potwierdzane zapisy i odczyty podczas
-flush, niezmienność wcześniejszych danych po podmianie reprezentacji
-oraz błąd punktu skierowanego do zamrożonego zakresu.
-\item Zrestartować bazę z zachowaniem wolumenu. Pokazać wcześniejsze dane
-i dalszy napływ pomiarów.
-\end{enumerate}
-
-Profil pokazowy z krótkim buforem nie jest profilem testu zasobów
-z lab1. Scenariusz awarii z SIGKILL jest wykonywany w testach
-kontrolowanych; sam restart demonstracyjny nie dowodzi gwarancji NFR-04.
 
 \section{Weryfikacja architektury i kryteria odbioru}
 \label{sec:verification}
@@ -2134,7 +2102,7 @@ Projekt Tokio, \emph{tokio::sync::watch},
 \noindent Dokumentację zewnętrzną sprawdzono 24.10.2026.
 Zachowanie własnego silnika określa niniejsza specyfikacja; odnośniki
 \emph{latest} służą jako kontekst, a zgodność integracji sprawdza się
-z przypiętymi wersjami używanymi w demonstracji.
+z przypiętymi wersjami używanymi we wdrożeniu.
 \endgroup
 
 \end{document}
