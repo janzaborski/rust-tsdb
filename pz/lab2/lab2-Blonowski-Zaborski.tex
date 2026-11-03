@@ -91,7 +91,7 @@ Dokument przedstawia projekt jednowęzłowej bazy danych szeregów czasowych:
 podział na moduły, model danych, zapis i odczyt, przechowywanie na dysku
 oraz odzyskiwanie po awarii. Opisuje wykonywanie zapytań, komunikację HTTP,
 integrację z Grafaną i granice dostępu do systemu.
-Jest specyfikacją docelową; parametry wydajnościowe są celami do weryfikacji.
+Jest specyfikacją docelową. Parametry wydajnościowe są celami do weryfikacji.
 
 \section*{Historia zmian}
 \begin{tabularx}{\linewidth}{P{15mm}P{28mm}P{37mm}Y}
@@ -162,7 +162,7 @@ Backup wymaga zatrzymania bazy i skopiowania katalogu danych.
 
 \section{Architektura i odpowiedzialności modułów}
 \label{sec:architecture}
-Przeglądarka komunikuje się z Grafaną; jej serwer odpytuje TSDB.
+Przeglądarka komunikuje się z Grafaną. Jej serwer odpytuje TSDB.
 Pomiary są przyjmowane przez API HTTP. Silnik korzysta z lokalnego systemu plików.
 
 \begin{figure}[!htbp]
@@ -224,7 +224,7 @@ a wykonawcę zapytań z pamięciowym interfejsem odczytu.
 \begin{tabularx}{\linewidth}{P{38mm}Y}
   \toprule
   Moduł              & Odpowiedzialność i kontrakt                                      \\ \midrule
-  HTTP i walidacja   & Dekodowanie, kanonizacja, limity i błędy;
+  HTTP i walidacja   & Dekodowanie, kanonizacja, limity i błędy,
   wywołanie zapisu lub zapytania.                                                       \\
   Koordynator zapisu & Podział pracy według szeregów,
   walidacja punktów i raportowanie częściowego wyniku.                                  \\
@@ -232,7 +232,7 @@ a wykonawcę zapytań z pamięciowym interfejsem odczytu.
   aktywny bufor, bloki zamrożone i segmenty dyskowe.                                    \\
   WAL                & Dziennik operacji, potwierdzanie zapisu i odtwarzanie po awarii. \\
   Magazyn segmentów  & Niezmienne pliki, katalog danych i odzyskiwanie po awarii.       \\
-  Parser i wykonawca & Analiza składni, plan, odczyt i obliczenia;
+  Parser i wykonawca & Analiza składni, plan, odczyt i obliczenia,
   przygotowanie wyniku zapytania.                                                       \\
   \bottomrule
 \end{tabularx}
@@ -249,8 +249,8 @@ opisują stan docelowy
 
 Szereg identyfikuje nazwa metryki i kanonicznie posortowane etykiety.
 Wewnętrzny LabelSet zawiera także \code{__name__}.
-Punkt to czas Unix w milisekundach (u64) i skończona wartość f64;
-para zajmuje 16 B. SeriesId jest lokalny dla head/WAL i może zmienić
+Punkt to czas Unix w milisekundach (u64) i skończona wartość f64.
+Para zajmuje 16 B. SeriesId jest lokalny dla head/WAL i może zmienić
 się po restarcie. Segmenty i manifest identyfikują szeregi przez klucze.
 
 \begin{figure}[!htbp]
@@ -302,7 +302,7 @@ się po restarcie. Segmenty i manifest identyfikują szeregi przez klucze.
 
 Aktywny bufor utrzymuje pomiary w kolejności czasu. Opóźniony pomiar
 wymaga wstawienia we właściwe miejsce. Zamrożenie przekazuje bufor
-do zapisu bez pełnej kopii; nowe pomiary trafiają do kolejnego bufora.
+do zapisu bez pełnej kopii. Nowe pomiary trafiają do kolejnego bufora.
 Widok zapytania kopiuje potrzebne dane aktywne i współdzieli niezmienne bloki.
 
 \subsection{Współbieżność i widoczność danych}
@@ -315,18 +315,18 @@ Nie zapewnia się izolacji ani wspólnej migawki czasu dla wielu szeregów.
 Koordynator rozdziela pracę według szeregów. Pracownik utrzymuje blokadę
 tylko jednego szeregu i przetwarza małą porcję pomiarów, następnie ją zwalnia.
 Nie zbiera blokad wszystkich szeregów paczki. Rejestracja nowego klucza
-w katalogu jest krótka; kodowanie, odczyt plików i oczekiwanie na
+w katalogu jest krótka. Kodowanie, odczyt plików i oczekiwanie na
 potwierdzenie dziennika nie blokują katalogu.
 
 Zapytanie utrwala dane osobno dla każdego wybranego szeregu i zwalnia
 jego blokadę przed przejściem do następnego. Poszczególne szeregi mogą
-odpowiadać różnym chwilom odczytu; szeregi utworzone w trakcie zapytania
+odpowiadać różnym chwilom odczytu. Szeregi utworzone w trakcie zapytania
 mogą być pominięte. Jednoczesny zrzut na dysk nie może powodować
 podwójnego zwracania ani pomijania już wybranych próbek.
 
 Pozostają gwarancje poprawnego pojedynczego pomiaru, chronologicznego
 odczytu i odzyskiwania potwierdzonych zapisów. Zmniejszenie zakresu blokad
-ogranicza wzajemne oczekiwanie; koszt wspólnego dziennika i obciążonych
+ogranicza wzajemne oczekiwanie. Koszt wspólnego dziennika i obciążonych
 szeregów nadal wymaga pomiaru.
 
 \subsection{Duplikaty i opóźnione punkty}
@@ -340,8 +340,8 @@ Dla nowego punktu obowiązuje
 gdzie $H_s$ to największy przyjęty czas,
 a $W$ okno opóźnienia (domyślnie 5 min).
 Każdy punkt porównuje się ze stanem szeregu w chwili jego przetwarzania.
-W obrębie pracy dla jednego szeregu pomiary porządkuje się po czasie;
-równe czasy zachowują kolejność wejścia.
+W obrębie pracy dla jednego szeregu pomiary porządkuje się po czasie.
+Równe czasy zachowują kolejność wejścia.
 
 \section{Ścieżka zapisu i architektura WAL}
 \label{sec:write}
@@ -350,7 +350,7 @@ WAL (Write-Ahead Log) pozwala odzyskać pomiary, które nie trafiły
 jeszcze do segmentów danych. Po sprawdzeniu składni żądania walidacja
 i rezerwacja pamięci odbywają się dla kolejnych punktów lub małych porcji
 jednego szeregu. Poprawne pomiary trafiają do dziennika i są udostępniane
-zapytaniom; błędne są raportowane osobno.
+zapytaniom. Błędne są raportowane osobno.
 
 Paczka HTTP może tworzyć wiele niezależnych wpisów dziennika, a pojedynczy
 wpis może łączyć kilka pomiarów dla wydajności. Granica wpisu nie ustanawia
@@ -375,7 +375,7 @@ już przyjętych danych.
     \node[note] at (14,-4.9) {okresowa synchronizacja\\bez potwierdzenia żądania};
   \end{tikzpicture}
   \caption{Przepływ zapisu małej porcji jednego szeregu. Paczka HTTP przechodzi
-    ten proces wielokrotnie; nie stanowi jednej transakcji.}
+    ten proces wielokrotnie. Nie stanowi jednej transakcji.}
   \label{fig:write-sequence}
 \end{figure}
 
@@ -388,11 +388,11 @@ blokowania żądań.
 \begin{tabularx}{\linewidth}{P{27mm}Y}
   \toprule
   Tryb                   & Warunek odpowiedzi po udostępnieniu danych do odczytu        \\ \midrule
-  \code{none} (domyślny) & Przyjęte punkty opublikowane w pamięci; awaria procesu
+  \code{none} (domyślny) & Przyjęte punkty opublikowane w pamięci. Awaria procesu
   może spowodować ich utratę.                                                           \\
   \code{written}         & Wpisy przyjętych punktów przekazane do systemu operacyjnego.
-  Przyjęte dane przetrwają awarię samego procesu przy sprawnym hoście i nośniku;
-  nie ma gwarancji przetrwania utraty zasilania.                                        \\
+  Przyjęte dane przetrwają awarię samego procesu przy sprawnym hoście i nośniku.
+  Nie ma gwarancji przetrwania utraty zasilania.                                        \\
   \bottomrule
 \end{tabularx}
 
@@ -402,13 +402,13 @@ wyznacza gwarantowanego okna utraty danych: zależy ono także od obciążenia
 i opóźnień urządzenia. Zapis do pamięci podręcznej systemu i trwałe
 utrwalenie na nośniku są odrębnymi operacjami.
 
-Po osiągnięciu progu rozmiaru dziennik przechodzi do kolejnego pliku;
-pojedynczy wpis nie jest dzielony między pliki. Przed checkpointem silnik
+Po osiągnięciu progu rozmiaru dziennik przechodzi do kolejnego pliku.
+Pojedynczy wpis nie jest dzielony między pliki. Przed checkpointem silnik
 ustala zamknięty, zsynchronizowany zbiór plików. Dopiero po trwałym
 opublikowaniu odpowiadających im segmentów można usunąć tę część dziennika.
 Po awarii odtwarzane są pełne wpisy nowsze od checkpointu.
-Błąd zapisu lub synchronizacji zatrzymuje dalsze przyjmowanie danych;
-żądania bez osiągniętego warunku potwierdzenia nie otrzymują sukcesu.
+Błąd zapisu lub synchronizacji zatrzymuje dalsze przyjmowanie danych.
+Żądania bez osiągniętego warunku potwierdzenia nie otrzymują sukcesu.
 
 \begin{figure}[!htbp]
   \centering
@@ -458,7 +458,7 @@ lub gdy bufor zbliża się do swojego limitu pamięci.
 \end{enumerate}
 Taki zakończony zapis tworzy checkpoint, czyli punkt, od którego
 baza może rozpocząć odtwarzanie nowszych danych po awarii.
-Przygotowanie danych wymaga krótkiej synchronizacji; zapis plików
+Przygotowanie danych wymaga krótkiej synchronizacji. Zapis plików
 odbywa się w tle. Pojedyncza paczka HTTP może zostać zapisana częściami
 w kolejnych segmentach.
 
@@ -513,7 +513,7 @@ avg_over_time(temperature_celsius{service="api"}[5m])
 Pozostałe funkcje: \code{min_over_time}, \code{max_over_time},
 \code{sum_over_time}, \code{count_over_time}.
 Selektor wybiera ostatnią próbkę z $[T-D,T]$ (lookback $D=5$ min).
-Funkcja działa osobno dla Series na $(T-R,T]$; puste okno pomija Series,
+Funkcja działa osobno dla Series na $(T-R,T]$. Puste okno pomija Series,
 również dla count. Range powtarza obliczenie dla
 $T_k=start+k\cdot step\leq end$, korzystając z widoków poszczególnych szeregów.
 Indeks etykiet wybiera Series, indeksy czasowe ograniczają odczyt,
@@ -540,8 +540,8 @@ a agregacje korzystają z przesuwanego okna.
 \subsection{Architektura wykonywania zapytań}
 Adapter HTTP sprawdza parametry. Parser przekształca
 tekst w drzewo wyrażenia, a planista ustala szeregi, zakres odczytu
-oraz siatkę czasu wyników. Indeks wybiera kandydatów według etykiet;
-metadane segmentów pozwalają pominąć pliki spoza zakresu.
+oraz siatkę czasu wyników. Indeks wybiera kandydatów według etykiet.
+Metadane segmentów pozwalają pominąć pliki spoza zakresu.
 
 Zapytanie otrzymuje widok pamięci i segmentów osobno dla każdego szeregu,
 bez wspólnego punktu w czasie dla wszystkich szeregów. Odczyt może obejmować
@@ -562,17 +562,17 @@ sprawdzają je między porcjami odczytu i obliczeń, a następnie zwalniają
 zasoby zapytania.
 
 \subsection{Interfejs HTTP}
-HTTP/1.1, UTF-8 i JSON; zapytania także przez formularz POST.
+HTTP/1.1, UTF-8 i JSON. Zapytania także przez formularz POST.
 Wartości wyników są napisami, czasy wyników sekundami Unix.
 Zapis przyjmuje milisekundy i skończone f64.
 \par
 \begin{tabularx}{\linewidth}{P{68mm}Y}
   \toprule
   Interfejs                                                            & Główny kontrakt                         \\ \midrule
-  POST \code{/api/v1/write_json}                                       & Jeden pomiar albo \code{points};
+  POST \code{/api/v1/write_json}                                       & Jeden pomiar albo \code{points},
   niezależne wyniki punktów.                                                                                     \\
-  GET/POST \code{/api/v1/query}                                        & query, opcjonalny time; wynik chwilowy. \\
-  GET/POST \code{/api/v1/query_range}                                  & query, start, end, dodatni step;
+  GET/POST \code{/api/v1/query}                                        & query, opcjonalny time, wynik chwilowy. \\
+  GET/POST \code{/api/v1/query_range}                                  & query, start, end, dodatni step,
   macierz wyników na siatce czasu.                                                                               \\
   GET \code{/api/v1/labels}, \code{/api/v1/label/<name>/values}        &
   Nazwy/wartości etykiet z całego katalogu.                                                                      \\
@@ -602,7 +602,7 @@ brak zasobów nie wycofują wcześniej przyjętych punktów.
 Zakończone przetwarzanie zwraca HTTP 200 z licznikami \code{inserted},
 \code{duplicates}, \code{rejected} i listą \code{errors}. Każdy błąd wskazuje
 \code{point_index}, liczony od zera w oryginalnym wejściu, i \code{reason}.
-Sukces obsługi żądania nie oznacza przyjęcia wszystkich pomiarów; również
+Sukces obsługi żądania nie oznacza przyjęcia wszystkich pomiarów. Również
 całkowite odrzucenie punktów jest rozpoznawane po licznikach.
 Po pełnym przetworzeniu suma trzech liczników równa się liczbie punktów.
 
@@ -615,7 +615,7 @@ wcześniejszego zapisu, jeśli klient wybrał ten tryb.
 Timeout, rozłączenie lub awaria w trakcie obsługi może pozostawić
 częściowy, nieznany klientowi wynik. Błąd całego żądania nie dowodzi
 wtedy braku zapisów. Ponowienie może dać duplikaty albo odrzucenia
-zamkniętych zakresów; nie gwarantuje się bezterminowej idempotencji.
+zamkniętych zakresów. Nie gwarantuje się bezterminowej idempotencji.
 
 \section{Technologie, wdrożenie i interfejs użytkownika}
 \label{sec:technology}
@@ -637,15 +637,15 @@ Wersje utrwala Cargo.lock, obraz Grafany jest przypięty.
 Platforma docelowa: Linux x86-64 i lokalny system plików.
 LOCK dopuszcza jeden proces na katalog. Usługi tsdb i grafana
 korzystają z sieci tsdb-net i wolumenu tsdb-data.
-Grafana odpytuje \code{http://tsdb:8080}; przeglądarka korzysta
+Grafana odpytuje \code{http://tsdb:8080}. Przeglądarka korzysta
 z portu 3000. API na porcie 8080 i Grafana są publikowane na loopback.
-Baza działa bez uprawnień administratora; profil dostępu opisano poniżej.
+Baza działa bez uprawnień administratora. Profil dostępu opisano poniżej.
 
 \subsection{Uwierzytelnianie i zakres dostępu}
 Profil podstawowy obejmuje jeden zaufany host: API jest dostępne na
 loopback lub w wydzielonej sieci kontenerów. Silnik nie ma własnego
 systemu kont, haseł ani uprawnień do poszczególnych szeregów.
-Logowanie do Grafany chroni jej interfejs; nie zabezpiecza samodzielnie
+Logowanie do Grafany chroni jej interfejs. Nie zabezpiecza samodzielnie
 bezpośredniego dostępu do API bazy.
 
 Dostęp spoza zaufanego hosta wymaga osobnego profilu wdrożenia:
@@ -663,16 +663,16 @@ role oraz certyfikaty klienckie pozostają poza zakresem pierwszej wersji.
 Nie zakłada się, że samo dodanie hasła do Grafany zastępuje tę warstwę.
 
 \subsection{Przykładowa konfiguracja i budżety}
-Konfiguracja CLI jest wczytywana przy starcie; Compose przekazuje ją
+Konfiguracja CLI jest wczytywana przy starcie. Compose przekazuje ją
 w command. Wartości domyślne:
 \par
 \begin{tabularx}{\linewidth}{P{48mm}Y}
   \toprule
   Obszar          & Wartości domyślne                                   \\ \midrule
   Head i katalog  & 512 MiB active/frozen/Arc, metadata 64 MiB,
-  10\,000 Series; buforowanie 30 min, out-of-order 5 min.               \\
+  10\,000 Series, buforowanie 30 min, out-of-order 5 min.               \\
   WAL i przyjęcie & 32 MiB na dwa bufory dziennika,
-  64 MiB na ciała żądań, paczki i kodowanie;
+  64 MiB na ciała żądań, paczki i kodowanie,
   8 przyjętych zapisów, 4 workers.                                      \\
   Paczka          & Do 10\,000 punktów, ciało 4 MiB, wpis WAL do 8 MiB. \\
   \bottomrule
