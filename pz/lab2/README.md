@@ -1,10 +1,11 @@
 # Laboratorium 2
 
-- [Wersja skrócona](lab2-Blonowski-Zaborski.pdf) — 11 stron, wersja 1.5.
+- [Wersja skrócona](lab2-Blonowski-Zaborski.pdf) — 12 stron, wersja 1.6.
   [Źródło LaTeX](lab2-Blonowski-Zaborski.tex).
-- [Wersja pełna z commita 4bca7d2](lab2-Blonowski-Zaborski-pelna.pdf)
-  — 34 strony, wersja 1.4. [Źródło LaTeX](lab2-Blonowski-Zaborski-pelna.tex).
-  Oba pliki przywrócono bez zmian z tego commita, do porównania.
+- [Wersja pełna](lab2-Blonowski-Zaborski-pelna.pdf)
+  — 35 stron, wersja 1.6. [Źródło LaTeX](lab2-Blonowski-Zaborski-pelna.tex).
+  Bazuje na wersji z commita `4bca7d2`; nazwy typów, pól, metod i tras HTTP
+  w obu wersjach ujednolicono z kodem. Planowane rozszerzenia oznaczono w treści.
 
 Budowanie z katalogu głównego repozytorium:
 

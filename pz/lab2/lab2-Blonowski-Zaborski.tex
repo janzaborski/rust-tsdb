@@ -76,8 +76,8 @@ szeregów czasowych\\w języku Rust\par}
 \begin{tabular}{rl}
 Autorzy: & Hubert Błonowski\\ & Jan Zaborski\\[.5em]
 Promotor: & mgr inż. Paweł Sobótka\\[.5em]
-Wersja dokumentu: & 1.5\\
-Data: & 2 listopada 2026 r.
+Wersja dokumentu: & 1.6\\
+Data: & 3 listopada 2026 r.
 \end{tabular}
 \vfill
 \url{https://github.com/janzaborski/rust-tsdb}
@@ -89,10 +89,10 @@ Data: & 2 listopada 2026 r.
 \section*{Streszczenie}
 Dokument przedstawia architekturę jednowęzłowej TSDB: moduły, model
 danych, współbieżny zapis, WAL, checkpoint, zapytania HTTP i integrację
-z Grafaną. Projekt łączy TSMap i bloki inspirowane Gorilla z WAL-em
+z Grafaną. Projekt łączy Index i bloki inspirowane Gorilla z WAL-em
 gałęzi \code{23-wal-improvements}. Jest specyfikacją docelową;
 parametry wydajnościowe są celami do weryfikacji.
-Pełną wersję sprzed skrócenia zachowano do porównania jako
+Pełną wersję z ujednoliconym nazewnictwem udostępniono jako
 \code{lab2-Blonowski-Zaborski-pelna.pdf}.
 
 \section*{Historia zmian}
@@ -101,11 +101,13 @@ Pełną wersję sprzed skrócenia zachowano do porównania jako
 \toprule
 Wersja & Data & Autorzy & Zakres\\ \midrule
 1.0--1.3 & 24.10--02.11.2026 & H. Błonowski,\newline J. Zaborski &
-Projekt modułów, TSMap/TS, diagramy i kontrakty.\\
+Projekt modułów, Index/Series, diagramy i kontrakty.\\
 1.4 & 02.11.2026 & H. Błonowski,\newline J. Zaborski &
 Dostosowanie do WAL-a z 23-wal-improvements.\\
 1.5 & 02.11.2026 & H. Błonowski,\newline J. Zaborski &
 Wersja do oceny; szczegóły implementacyjne w osobnym dokumencie.\\
+1.6 & 03.11.2026 & H. Błonowski,\newline J. Zaborski &
+Ujednolicenie nazw typów, pól, metod i tras HTTP z kodem.\\
 \bottomrule
 \end{tabularx}
 \par
@@ -128,8 +130,8 @@ i wykonywania agregacji czasowych. Użytkownik analizuje dane w Grafanie.
 Zakres z lab1 \cite{lab1} obejmuje HTTP, etykiety, pięć agregacji,
 out-of-order w otwartym buforze oraz demonstrację w Docker Compose.
 
-System jest modularnym monolitem na jednym węźle. Jedna TSMap kataloguje
-szeregi TS, każdy z osobną blokadą; projekt nie wymaga shardów.
+System jest modularnym monolitem na jednym węźle. Jeden Index kataloguje
+szeregi Series, każdy z osobną blokadą; projekt nie wymaga shardów.
 Niekompresowane bloki aktywne i zamrożone umożliwiają zapis podczas
 flush. Poza zakresem pozostają klaster, replikacja, kompresja, retencja,
 kompaktowanie, alertowanie i własny frontend. Dane rosną do usunięcia
@@ -206,7 +208,7 @@ nie jest potrzebny. Silnik korzysta z lokalnego systemu plików.
 \draw[assoc] (browser) -- node[note,right]{HTTP\\127.0.0.1:3000} (grafana);
 \draw[assoc] (curl) -- node[note,right]{HTTP\\127.0.0.1:8080} (db);
 \draw[assoc] (grafana) -- node[note,above]{HTTP / JSON\\http://tsdb:8080} (db);
-\draw[assoc] (gen.east) -- node[note,above]{HTTP JSON: POST /api/v1/write}
+\draw[assoc] (gen.east) -- node[note,above]{HTTP JSON: POST /api/v1/write\_json}
   (10,-6.1) -- (db.south);
 \draw[assoc] (db.south east) -- (11.2,-5.4) --
   node[note,right]{lokalne I/O} (11.2,-7.5) -- (data.north east);
@@ -230,7 +232,7 @@ a wykonawcę zapytań z pamięciowym interfejsem odczytu.
 \node[box] (write) at (-3,-2) {Koordynator zapisu\\walidacja paczek};
 \node[box] (query) at (3,-2) {Parser i wykonawca\\zapytań};
 \node[box,text width=108mm] (engine) at (0,-4.2)
-  {Silnik: TSMap, indeks etykiet, TS z własnymi blokadami i blokami};
+  {Silnik: Index, indeks etykiet, Series z własnymi blokadami i blokami};
 \node[box] (wal) at (-3,-6.2) {Bufor WAL\\flusher i syncer};
 \node[box] (segment) at (3,-6.2) {Flush w tle\\segmenty i manifest};
 \draw[arrow] (http.south) -- ++(0,-0.4) -| (write.north);
@@ -251,7 +253,7 @@ HTTP i walidacja & Dekodowanie, kanonizacja, limity i błędy;
 wywołanie zapisu lub zapytania.\\
 Koordynator zapisu & Walidacja całej paczki, rezerwacja zasobów,
 kolejność blokad i wywołanie WalWriter.\\
-TSMap, TS i indeksy & Klucz $\leftrightarrow$ TS, dobór po etykietach,
+Index, Series i indeksy & Klucz $\leftrightarrow$ Series, dobór po etykietach,
 aktywny blok oraz uchwyty frozen/segmentów.\\
 WAL & Append do RAM, postęp Written, zapis/sync w tle, cut i replay.\\
 Magazyn segmentów & Niezmienne pliki, manifest, checkpoint i recovery.\\
@@ -262,6 +264,21 @@ $\rightarrow$ wynik; limity czasu, pamięci i pracy.\\
 
 \section{Model danych i współbieżność}
 \label{sec:model}
+
+Nazwy odpowiadają kodowi: \code{Index} (\code{src/storage/index.rs}),
+\code{Series} i \code{SeriesState} (\code{src/storage/series.rs})
+oraz \code{LabelSet}, \code{Sample}, \code{SeriesId} i \code{TimeRange}
+(\code{src/model.rs}). Bazą zarządza \code{Db} z \code{DbState}.
+Metody to \code{Db.write(WriteBatch)}, \code{Db.wait(Lsn)}
+i \code{Db.query(&[Matcher], TimeRange)} zwracająca \code{Vec<SeriesResult>}.
+Pliki danych obsługuje \code{SegmentStore} (\code{src/storage/segment.rs}).
+Diagram pokazuje istniejące pola i metody oraz planowane bloki.
+\code{MutableBlock}, \code{FrozenBlock}, \code{BlockDescriptor},
+\code{ReadView}, granica \code{sealed_through}, \code{last_lsn}
+i wersjonowanie katalogu są elementami projektu do implementacji.
+Obecny \code{Series.state} używa \code{Mutex<SeriesState>}; opisane dalej
+współdzielone blokady odczytu wymagają docelowo \code{RwLock}.
+
 Szereg identyfikuje nazwa metryki i kanonicznie posortowane etykiety.
 Wewnętrzny LabelSet zawiera także \code{__name__}.
 Punkt to czas Unix w milisekundach (u64) i skończona wartość f64;
@@ -272,33 +289,35 @@ się po restarcie. Segmenty i manifest identyfikują szeregi przez klucze.
 \centering
 \begin{tikzpicture}
 \node[umlclass,text width=56mm] (map) at (0,0) {
-  \textbf{TSMap}\nodepart{second}
-  by\_key: HashMap<Key, Arc<TS>{}>\\
-  by\_id: Vec<Arc<TS>{}>\\
-  label\_index: LabelIndex\\
-  catalog\_version: AtomicU64\\
-  catalog: RwLock
-  \nodepart{third}lookup(key / id), select(labels)};
+  \textbf{Index}\nodepart{second}
+  inverted: HashMap<LabelSet, Arc<Series>{}>\\
+  forward: HashMap<SeriesId, Arc<Series>{}>\\
+  posting\_index: HashMap<String,\\
+  HashMap<String, Vec<SeriesId>{}>{}>\\
+  all\_ids: Vec<SeriesId>, next\_id: SeriesId
+  \nodepart{third}encode(labels), get(id)\\resolve(matchers), id\_for(labels)};
 \node[umlclass,text width=45mm] (ts) at (8,0) {
-  \textbf{TS}\nodepart{second}
-  id: SeriesId \{immutable\}\\key: SeriesKey \{immutable\}\\
-  state: RwLock<TSState>
-  \nodepart{third}validate(batch), append(plan)};
+  \textbf{Series}\nodepart{second}
+  id: SeriesId\\labels: Arc<LabelSet>\\
+  state: Mutex<SeriesState>
+  \nodepart{third}new(id, labels), lock()};
 \node[umlclass,text width=50mm] (st) at (8,-3.4) {
-  \textbf{TSState}\nodepart{second}
-  latest\_time: Option<Timestamp>\\
-  sealed\_through: Option<Time>\\last\_lsn: Lsn\\logged\_gen: Option<u64>
-  \nodepart{third}freeze(), snapshot(bounds)};
+  \textbf{SeriesState}\nodepart{second}
+  samples: Vec<Sample>\\
+  newest: Option<u64>\\logged\_gen: u64
+  \nodepart{third}accepts(timestamp), append(sample)\\
+  range(TimeRange), take\_samples()\\
+  is\_logged(g), mark\_logged(g)};
 \node[umlclass,text width=43mm] (mut) at (0,-3.4) {
-  \textbf{MutableBlock}\nodepart{second}
+  \textbf{MutableBlock} (plan)\nodepart{second}
   samples: Vec<Sample> \{sorted\}
   \nodepart{third}insert(sample), slice(bounds)};
 \node[umlclass,text width=43mm] (froz) at (0,-6.3) {
-  \textbf{FrozenBlock}\nodepart{second}
+  \textbf{FrozenBlock} (plan)\nodepart{second}
   samples: Vec<Sample>\\\{immutable, shared by Arc\}
   \nodepart{third}slice(bounds)};
 \node[umlclass,text width=50mm] (disk) at (8,-6.3) {
-  \textbf{BlockDescriptor}\nodepart{second}
+  \textbf{BlockDescriptor} (plan)\nodepart{second}
   segment, min/max, offset, count
   \nodepart{third}read(bounds)};
 \draw[assoc] (map) -- node[note,pos=.12,above]{1}
@@ -310,27 +329,27 @@ się po restarcie. Segmenty i manifest identyfikują szeregi przez klucze.
 \draw[compose] (st) -- node[note,right]{persisted: 0..*} (disk);
 \end{tikzpicture}
 \caption{Model head. Romb: własność; linia: asocjacja.
-Key = SeriesKey, Time = Timestamp; próbka zajmuje 16 B.}
+Klucz: LabelSet, czas: u64; próbka zajmuje 16 B.}
 \label{fig:classes}
 \end{figure}
 
 Inspiracją z Gorilla \cite{gorilla} jest oddzielenie katalogu, synchronizacji
-TS i bloków. Active to posortowany wektor: rosnące czasy dopisuje na końcu,
+Series i bloków. Active to posortowany wektor: rosnące czasy dopisuje na końcu,
 out-of-order wymaga wstawienia. Freeze przenosi wektor do współdzielonego
 Arc bez pełnej kopii; nowy active przyjmuje pomiary. ReadView kopiuje
 potrzebne active i współdzieli niezmienne bloki.
 
 \subsection{Reguły spójności}
 \label{sec:concurrency}
-Zapis jest atomowy dla całej paczki, także obejmującej kilka TS.
+Zapis jest atomowy dla całej paczki, także obejmującej kilka Series.
 Dla nowych kluczy najpierw pobiera się mutex rejestracji.
 Każda paczka pobiera następnie współdzieloną barierę generacji
-i wyłączne blokady TS rosnąco po ID. Rezerwacja zasobów poprzedza append. Kolejność: WAL append, publikacja całej paczki,
+i wyłączne blokady Series rosnąco po ID. Rezerwacja zasobów poprzedza append. Kolejność: WAL append, publikacja całej paczki,
 zwolnienie blokad i dopiero ewentualne oczekiwanie Written.
 Blokady katalogu nie obejmują kodowania ani I/O.
 
 Odczyt wybiera uchwyty i wersję katalogu, następnie pod współdzielonymi
-blokadami wybranych TS tworzy jeden ReadView dla całego zapytania.
+blokadami wybranych Series tworzy jeden ReadView dla całego zapytania.
 Zmiana wersji katalogu wymusza ponowienie. Odczyt nie widzi części
 paczki; może widzieć paczkę klienta nadal czekającego na Written.
 Widoczność i trwałość są odrębne.
@@ -404,12 +423,12 @@ zaczyna od 0 i nie jest trwałym kursorem recovery.
  \textbf{Shared}\nodepart{second}
  buffer: WalBuffer\\progress: Progress (watch Written)\\
  sync\_file: Mutex<Arc<File>{}>\\active\_segment, cut
- \nodepart{third}publish\_written(), unpark()};
+ \nodepart{third}progress.publish\_written()\\progress.unpark\_flusher()};
 \node[umlclass,text width=48mm] (flush) at (0,-3.5) {
- \textbf{Flusher}\nodepart{second}spare: Vec<u8>\\segment: ActiveSegment
- \nodepart{third}take(), write\_all(), rotate()\\serve\_cut()};
+ \textbf{Threads::flush\_loop}\nodepart{second}spare: Vec<u8>\\seg: ActiveSegment
+ \nodepart{third}buffer.take(), write\_batch()\\rotate(), cut.finish()};
 \node[umlclass,text width=48mm] (sync) at (8,-3.5) {
- \textbf{Syncer}\nodepart{second}last\_written: Lsn
+ \textbf{Threads::sync\_loop}\nodepart{second}last: Lsn
  \nodepart{third}co sync\_interval:\\clone(sync\_file), sync\_data()};
 \draw[assoc] (writer) -- (shared);
 \draw[arrow,dashed] (flush.north east) -- node[note,sloped,above]
@@ -417,7 +436,7 @@ zaczyna od 0 i nie jest trwałym kursorem recovery.
 \draw[arrow,dashed] (shared) -- node[note,right]{Arc<File>} (sync);
 \draw[arrow,dashed] (writer) -- node[note,left]{pobudzenie} (flush);
 \end{tikzpicture}
-\caption{Typy i odpowiedzialności WAL-a z brancha.
+\caption{Typy i funkcje WAL-a. Flusher i syncer to role wątków Threads.
 Syncer nie publikuje postępu do klienta; cut obsługuje flusher.}
 \label{fig:wal-classes}
 \end{figure}
@@ -448,12 +467,12 @@ lub dostaje 503 przed append.
 
 \begin{enumerate}
 \item Wyłączna bariera czeka na rozpoczęte WAL append--head append.
-Bez blokad TS wykonuje Wal.cut: drain, sync i rotacja; wynik to ID
+Bez blokad Series wykonuje Wal.cut: drain, sync i rotacja; wynik to ID
 zamkniętego pliku $N$. Na czas cut nowe zapisy czekają na I/O.
 \item Freeze przenosi active do frozen, podnosi $S_s$ i otwiera
 generację $g+1$. Po zwolnieniu bariery nowe zapisy idą do WAL $>N$.
-Pierwszy zapis każdego TS ponownie loguje definicję (logged\_gen),
-nawet gdy TS istniał przed cut.
+Pierwszy zapis każdego Series ponownie loguje definicję (logged\_gen),
+nawet gdy Series istniał przed cut.
 \item W tle: segment danych i jego sync, potem atomowo opublikowany
 i zsynchronizowany manifest z checkpointem $N$.
 \item Zamiana frozen na deskryptory, potem remove\_through($N$).
@@ -510,6 +529,15 @@ bufor i dołącza wątki. Pełny flush head nie jest konieczny.
 \section{Zapytania i komunikacja HTTP}
 \label{sec:language}
 \label{sec:http}
+
+Nazwy istniejących tras w \code{src/api.rs} to
+\code{POST /api/v1/write_json} (handler \code{write_json})
+i \code{GET /api/v1/read} (handler \code{read}). Obecny zapis przyjmuje
+tablicę obiektów \code{labels}/\code{samples}, gdzie próbka ma pola
+\code{t}/\code{v}; odczyt używa \code{start}, \code{end}, \code{name}
+i filtrów etykiet. Poniżej opisano docelowe rozszerzenie kontraktu zapisu
+oraz planowane endpointy Prometheusa i diagnostyki.
+
 Obsługiwany podzbiór PromQL \cite{prom-api} obejmuje nazwany selektor
 z dokładnym dopasowaniem etykiet, pięć funkcji czasowych i prosty skalar
 (np. 1+1 do próby połączenia). Bez regexów, zagnieżdżeń i agregacji
@@ -521,10 +549,10 @@ avg_over_time(temperature_celsius{service="api"}[5m])
 Pozostałe funkcje: \code{min_over_time}, \code{max_over_time},
 \code{sum_over_time}, \code{count_over_time}.
 Selektor wybiera ostatnią próbkę z $[T-D,T]$ (lookback $D=5$ min).
-Funkcja działa osobno dla TS na $(T-R,T]$; puste okno pomija TS,
+Funkcja działa osobno dla Series na $(T-R,T]$; puste okno pomija Series,
 również dla count. Range powtarza obliczenie dla
 $T_k=start+k\cdot step\leq end$, używając jednego ReadView.
-Indeks etykiet wybiera TS, indeksy czasowe ograniczają odczyt,
+Indeks etykiet wybiera Series, indeksy czasowe ograniczają odczyt,
 a agregacje korzystają z przesuwanego okna.
 
 \begin{figure}[!htbp]
@@ -552,7 +580,7 @@ Zapis przyjmuje milisekundy i skończone f64.
 \begin{tabularx}{\linewidth}{P{68mm}Y}
 \toprule
 Interfejs & Główny kontrakt\\ \midrule
-POST \code{/api/v1/write} & Jeden pomiar albo \code{points};
+POST \code{/api/v1/write_json} & Jeden pomiar albo \code{points};
 opcjonalne durability=none|written, cała paczka atomowa.\\
 GET/POST \code{/api/v1/query} & query, opcjonalny time; wynik chwilowy.\\
 GET/POST \code{/api/v1/query_range} & query, start, end, dodatni step;
@@ -564,7 +592,7 @@ Wersja TSDB, zdrowie i gotowość po recovery.\\
 \bottomrule
 \end{tabularx}
 \begin{lstlisting}
-POST /api/v1/write?durability=written
+POST /api/v1/write_json?durability=written
 {"metric":"temperature_celsius","labels":{"service":"api"},
  "timestamp":1792843200000,"value":24.5}
 \end{lstlisting}
@@ -615,11 +643,11 @@ w command. Kluczowe wartości:
 \toprule
 Obszar & Wartości domyślne / ograniczenia\\ \midrule
 Head i katalog & 512 MiB active/frozen/Arc, metadata 64 MiB,
-10\,000 TS; buforowanie 30 min, out-of-order 5 min.\\
+10\,000 Series; buforowanie 30 min, out-of-order 5 min.\\
 WAL i przyjęcie & 32 MiB active+spare, 64 MiB ciał/paczek/scratch;
 8 przyjętych zapisów, 4 workers.\\
 Paczka & Do 10\,000 punktów, ciało 4 MiB, ramka HTTP do 8 MiB.\\
-Zapytanie & 2 równoległe; po 64 MiB, 30 s, 1000 TS,
+Zapytanie & 2 równoległe; po 64 MiB, 30 s, 1000 Series,
 2 mln wejściowych próbek i 1 mln punktów wyniku.\\
 \bottomrule
 \end{tabularx}
@@ -690,7 +718,7 @@ obejmą zapis ramki, cut, manifest i usuwanie plików.
 Cel z lab1 & Profil pomiaru\\ \midrule
 p95: zapis 100 ms, paczka 500 ms; odczyt 200 ms, agregacja RAM 500 ms &
 HTTP z kolejką i Written; paczka 1000 punktów, odczyt 1000 wyników.\\
-Co najmniej 10\,000 punktów/s & 1000 TS, paczki po 1000, 4 klientów,
+Co najmniej 10\,000 punktów/s & 1000 Series, paczki po 1000, 4 klientów,
 Written, godzina z flush.\\
 RSS do 1 GiB & 10\,000 punktów/s, 30 min buforowania, minimum 65 min,
 także podczas flush i z dwoma zapytaniami.\\
