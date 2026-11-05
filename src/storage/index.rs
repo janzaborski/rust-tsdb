@@ -64,9 +64,9 @@ impl Index {
 
         for (name, value) in labels {
             self.posting_index
-                .entry(name.clone())
+                .entry(name.into())
                 .or_default()
-                .entry(value.clone())
+                .entry(value.into())
                 .or_default()
                 .push(id);
         }
@@ -186,15 +186,12 @@ fn union_all(values: &HashMap<String, Vec<SeriesId>>) -> Vec<SeriesId> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use crate::model::{Label, MatcherOperator};
+    use crate::model::MatcherOperator;
 
     fn label_set(pairs: &[(&str, &str)]) -> LabelSet {
-        let mut set = LabelSet::new();
-        for (name, value) in pairs {
-            set.insert_label(Label::new(*name, *value));
-        }
-        set
+        LabelSet::from_pairs(pairs.iter().copied())
     }
 
     fn not_equal(name: &str, value: &str) -> Matcher {
@@ -228,13 +225,8 @@ mod tests {
     fn encode_treats_different_insertion_order_as_same_series() {
         let mut index = Index::new();
 
-        let mut ls_a = LabelSet::new();
-        ls_a.insert_label(Label::new("__name__", "cpu"));
-        ls_a.insert_label(Label::new("host", "a"));
-
-        let mut ls_b = LabelSet::new();
-        ls_b.insert_label(Label::new("host", "a"));
-        ls_b.insert_label(Label::new("__name__", "cpu"));
+        let ls_a = label_set(&[("__name__", "cpu"), ("host", "a")]);
+        let ls_b = label_set(&[("host", "a"), ("__name__", "cpu")]);
 
         let id_a = index.encode(&ls_a).id;
         let id_b = index.encode(&ls_b).id;
@@ -502,11 +494,11 @@ mod tests {
     #[test]
     fn encode_empty_label_set_creates_label_less_series() {
         let mut index = Index::new();
-        let id = index.encode(&LabelSet::new()).id;
+        let id = index.encode(&LabelSet::default()).id;
 
         // In the universe, no posting entries, reachable only via an empty query.
         assert_eq!(index.resolve(&[]), vec![id]);
-        assert_eq!(index.labels_for(id), Some(LabelSet::new()));
+        assert_eq!(index.labels_for(id), Some(LabelSet::default()));
         assert!(index.posting_index.is_empty());
     }
 

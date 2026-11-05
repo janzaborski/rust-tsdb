@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 use tsdb::{
     Db, WriteBatch,
-    model::{Label, LabelSet, Sample},
+    model::{LabelSet, Sample},
     router,
 };
 
@@ -145,7 +145,7 @@ async fn read_preserves_default_and_inclusive_time_bounds() {
     let db = Arc::new(Db::new());
     db.write(WriteBatch {
         series: vec![(
-            LabelSet::from_labels([Label::new("__name__", "cpu")]),
+            LabelSet::from_pairs([("__name__", "cpu")]),
             vec![
                 Sample::new(0, 0.0),
                 Sample::new(100, 1.0),
