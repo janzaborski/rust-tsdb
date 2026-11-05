@@ -294,10 +294,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
-    use crate::model::Label;
 
     fn labels(host: &str) -> LabelSet {
-        LabelSet::from_labels([Label::new("host", host)])
+        LabelSet::from_pairs([("host", host)])
     }
 
     struct TestDir(PathBuf);

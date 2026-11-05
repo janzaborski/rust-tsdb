@@ -1,11 +1,11 @@
 use super::*;
-use crate::model::{Label, LabelSet, Sample, SeriesId};
+use crate::model::{LabelSet, Sample, SeriesId};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 
 fn labels(v: &str) -> LabelSet {
-    LabelSet::from_labels([Label::new("s", v)])
+    LabelSet::from_sorted_pairs(&[("s", v)])
 }
 
 fn s(t: u64) -> Sample {

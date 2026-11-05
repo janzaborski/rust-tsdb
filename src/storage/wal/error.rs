@@ -23,11 +23,11 @@ pub enum CodecError {
     #[error("unexpected end of input")]
     UnexpectedEof,
 
-    #[error("invalid utf-8 in label")]
-    BadUtf8,
-
     #[error("trailing bytes after record")]
     TrailingBytes,
+
+    #[error("invalid label set")]
+    InvalidLabels,
 }
 
 #[derive(Error, Debug)]
