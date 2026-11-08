@@ -1,6 +1,6 @@
 use super::error::CodecError;
 use super::record::{RecordHeader, RecordKind, SamplesEntry, SeriesEntry, WalRecord};
-use crate::model::{Label, LabelSet, Sample, SeriesId};
+use crate::model::{LabelOffset, LabelSet, Sample, SeriesId};
 
 const SAMPLE_ENCODED_LEN: usize = size_of::<u64>() + size_of::<f64>();
 
@@ -11,29 +11,47 @@ pub trait LabelSetEncoding: Sized {
 
 impl LabelSetEncoding for LabelSet {
     fn encode(&self, out: &mut Vec<u8>) {
-        put_u32(out, self.len() as u32);
-        for (name, value) in self.into_iter() {
-            put_bytes(out, name.as_bytes());
-            put_bytes(out, value.as_bytes());
+        let (data, offsets) = self.raw_parts();
+
+        put_u32(out, offsets.len() as u32);
+        put_u32(out, data.len() as u32);
+        out.reserve(offsets.len() * LABEL_OFFSET_LEN + data.len());
+
+        for o in offsets {
+            put_u32(out, o.name_start());
+            put_u32(out, o.value_start());
         }
+
+        out.extend_from_slice(data);
     }
 
     fn decode(r: &mut Reader) -> Result<Self, CodecError> {
         let n = r.read_u32()? as usize;
-        if n > r.remaining() / (size_of::<u32>() + size_of::<u32>()) {
+        let len = r.read_u32()? as usize;
+
+        if n > r.remaining() / LABEL_OFFSET_LEN {
             return Err(CodecError::UnexpectedEof);
         }
 
-        let mut labels = Vec::with_capacity(n);
-        for _ in 0..n {
-            let name = r.read_str()?;
-            let value = r.read_str()?;
-            labels.push(Label::new(name, value));
-        }
+        let offsets = r
+            .take(n * LABEL_OFFSET_LEN)?
+            .as_chunks::<LABEL_OFFSET_LEN>()
+            .0
+            .iter()
+            .map(|c| {
+                let name_start = u32::from_le_bytes(c[..4].try_into().expect("4 bytes"));
+                let value_start = u32::from_le_bytes(c[4..].try_into().expect("4 bytes"));
+                LabelOffset::new(name_start, value_start)
+            })
+            .collect();
 
-        Ok(LabelSet::from_labels(labels))
+        let data = r.take(len)?;
+
+        LabelSet::from_raw_parts(data, offsets).ok_or(CodecError::InvalidLabels)
     }
 }
+
+const LABEL_OFFSET_LEN: usize = 2 * size_of::<u32>();
 
 pub struct RecordEncoder<'a> {
     out: &'a mut Vec<u8>,
@@ -98,11 +116,6 @@ fn put_f64(out: &mut Vec<u8>, v: f64) {
     out.extend_from_slice(&v.to_le_bytes());
 }
 
-fn put_bytes(out: &mut Vec<u8>, b: &[u8]) {
-    put_u32(out, b.len() as u32);
-    out.extend_from_slice(b);
-}
-
 pub fn decode(kind: RecordKind, payload: &[u8]) -> Result<WalRecord, CodecError> {
     let RecordKind::Write = kind;
 
@@ -153,7 +166,7 @@ pub struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    fn new(buf: &'a [u8]) -> Self {
+    pub(crate) fn new(buf: &'a [u8]) -> Self {
         Self { buf, pos: 0 }
     }
 
@@ -183,11 +196,6 @@ impl<'a> Reader<'a> {
         Ok(f64::from_le_bytes(
             self.take(size_of::<f64>())?.try_into().expect("8 bytes"),
         ))
-    }
-
-    fn read_str(&mut self) -> Result<&'a str, CodecError> {
-        let len = self.read_u32()? as usize;
-        std::str::from_utf8(self.take(len)?).map_err(|_| CodecError::BadUtf8)
     }
 
     fn is_empty(&self) -> bool {

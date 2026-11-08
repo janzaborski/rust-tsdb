@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 use tsdb::{
     Db, WriteBatch,
-    model::{Label, LabelSet, Sample},
+    model::{LabelSet, Sample},
     router,
 };
 
@@ -25,7 +25,7 @@ async fn write_then_read_roundtrips() {
     let write_res = app
         .clone()
         .oneshot(
-            Request::post("/api/v1/write_json")
+            Request::post("/debug/write_json")
                 .header("content-type", "application/json")
                 .body(Body::from(write_body.to_string()))
                 .unwrap(),
@@ -37,7 +37,7 @@ async fn write_then_read_roundtrips() {
     let read_res = app
         .oneshot(
             Request::get(
-                "/api/v1/read?name=cpu_usage&host=abc&start=1719000000000&end=1719000002000",
+                "/debug/read?name=cpu_usage&host=abc&start=1719000000000&end=1719000002000",
             )
             .body(Body::empty())
             .unwrap(),
@@ -76,7 +76,7 @@ async fn empty_series_writes_do_not_break_reads_or_change_existing_samples() {
         let response = app
             .clone()
             .oneshot(
-                Request::post("/api/v1/write_json")
+                Request::post("/debug/write_json")
                     .header("content-type", "application/json")
                     .body(Body::from(body.to_string()))
                     .unwrap(),
@@ -87,7 +87,7 @@ async fn empty_series_writes_do_not_break_reads_or_change_existing_samples() {
     }
 
     let response = app
-        .oneshot(Request::get("/api/v1/read").body(Body::empty()).unwrap())
+        .oneshot(Request::get("/debug/read").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -125,7 +125,7 @@ async fn read_rejects_malformed_and_reversed_time_ranges() {
         let response = app
             .clone()
             .oneshot(
-                Request::get(format!("/api/v1/read?{query}"))
+                Request::get(format!("/debug/read?{query}"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -145,7 +145,7 @@ async fn read_preserves_default_and_inclusive_time_bounds() {
     let db = Arc::new(Db::new());
     db.write(WriteBatch {
         series: vec![(
-            LabelSet::from_labels([Label::new("__name__", "cpu")]),
+            LabelSet::from_pairs([("__name__", "cpu")]),
             vec![
                 Sample::new(0, 0.0),
                 Sample::new(100, 1.0),
@@ -157,13 +157,13 @@ async fn read_preserves_default_and_inclusive_time_bounds() {
     let app = router(db);
 
     for (uri, expected_count) in [
-        ("/api/v1/read", 3),
-        ("/api/v1/read?start=100", 2),
-        ("/api/v1/read?end=100", 2),
-        ("/api/v1/read?start=100&end=100", 1),
-        ("/api/v1/read?start=0&end=0", 1),
+        ("/debug/read", 3),
+        ("/debug/read?start=100", 2),
+        ("/debug/read?end=100", 2),
+        ("/debug/read?start=100&end=100", 1),
+        ("/debug/read?start=0&end=0", 1),
         (
-            "/api/v1/read?start=18446744073709551615&end=18446744073709551615",
+            "/debug/read?start=18446744073709551615&end=18446744073709551615",
             1,
         ),
     ] {
@@ -197,7 +197,7 @@ async fn writes_discard_old_and_duplicate_samples_and_still_return_success() {
         let response = app
             .clone()
             .oneshot(
-                Request::post("/api/v1/write_json")
+                Request::post("/debug/write_json")
                     .header("content-type", "application/json")
                     .body(Body::from(
                         json!([{"labels": {"__name__": "cpu"}, "samples": samples}]).to_string(),
@@ -210,7 +210,7 @@ async fn writes_discard_old_and_duplicate_samples_and_still_return_success() {
     }
     let response = app
         .oneshot(
-            Request::get("/api/v1/read?name=cpu")
+            Request::get("/debug/read?name=cpu")
                 .body(Body::empty())
                 .unwrap(),
         )
