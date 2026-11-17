@@ -192,6 +192,10 @@ impl Db {
         }
     }
 
+    pub fn is_ready(&self) -> bool {
+        !self.failed.load(Ordering::Relaxed)
+    }
+
     pub fn flush(&self) -> Result<(), DbError> {
         self.flush_if_at_least(1)
     }

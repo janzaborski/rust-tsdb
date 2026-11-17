@@ -1,0 +1,211 @@
+{
+  "uid": "tsdb-demo",
+  "title": "TSDB PC Telemetry",
+  "description": "Windows host counters collected by demo/telemetry/windows.ps1. Start the collector on Windows to build measurement history.",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "1s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "CPU usage",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "tsdb"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "pc_cpu_usage_percent{source=\"windows\"}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{host}}",
+          "exemplar": false
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "RAM usage",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "tsdb"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "pc_memory_usage_percent{source=\"windows\"}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{host}}",
+          "exemplar": false
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Disk I/O",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "tsdb"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "pc_disk_read_bytes_per_second{source=\"windows\"}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{volume}} read",
+          "exemplar": false
+        },
+        {
+          "refId": "B",
+          "expr": "pc_disk_write_bytes_per_second{source=\"windows\"}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{volume}} write",
+          "exemplar": false
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Network traffic",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "tsdb"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "pc_network_receive_bytes_per_second{source=\"windows\"}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{interface}} receive",
+          "exemplar": false
+        },
+        {
+          "refId": "B",
+          "expr": "pc_network_send_bytes_per_second{source=\"windows\"}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{interface}} send",
+          "exemplar": false
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ],
+  "timepicker": {
+    "refresh_intervals": [
+      "1s",
+      "5s",
+      "10s",
+      "30s",
+      "1m"
+    ]
+  }
+}

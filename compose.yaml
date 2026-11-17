@@ -1,0 +1,27 @@
+services:
+  tsdb:
+    build: .
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: ["tsdb-data:/data"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  grafana:
+    image: grafana/grafana:13.2.6-slim
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: demo-admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 1s
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./demo/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./demo/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      tsdb: {condition: service_healthy}
+volumes:
+  tsdb-data:
+  grafana-data:
