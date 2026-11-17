@@ -5,3 +5,5 @@ pub mod storage;
 
 pub use api::router;
 pub use db::{Db, DbError, SeriesResult, WriteBatch};
+
+mod query;

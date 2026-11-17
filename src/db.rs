@@ -186,6 +186,10 @@ impl Db {
         }
     }
 
+    pub fn is_ready(&self) -> bool {
+        self.state.read().is_ok_and(|state| !state.failed)
+    }
+
     pub fn flush(&self) -> Result<(), DbError> {
         let mut state = self.state.write().unwrap();
         if state.failed {

@@ -1,4 +1,5 @@
 mod decode;
+mod prom;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -19,6 +20,17 @@ use serde_json::{Value, json};
 
 pub fn router(db: Arc<Db>) -> Router {
     Router::new()
+        .route(
+            "/api/v1/query",
+            get(prom::instant_get).post(prom::instant_post),
+        )
+        .route(
+            "/api/v1/query_range",
+            get(prom::range_get).post(prom::range_post),
+        )
+        .route("/api/v1/status/buildinfo", get(prom::buildinfo))
+        .route("/healthz", get(|| async { StatusCode::OK }))
+        .route("/readyz", get(prom::ready))
         .route("/api/v1/write", post(remote_write))
         .route("/debug/write_json", post(write_json))
         .route("/debug/read", get(read))
