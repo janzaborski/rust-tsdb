@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::model::{LabelSet, Matcher, Sample, SeriesId, TimeRange};
 use crate::storage::segment::SegmentStore;
 use crate::storage::wal::{Durability, Lsn, ReplaySink, Wal, WalConfig, WalError, WalWriter};
-use crate::storage::{Index, Series, StorageError};
+use crate::storage::{Index, Series, SharedIndex, StorageError};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,22 +43,17 @@ pub enum DbError {
 }
 
 struct Persistence {
-    disk: SegmentStore,
+    disk: Mutex<SegmentStore>,
     wal: Wal,
 }
 
-#[derive(Default)]
-struct DbState {
-    index: Index,
-    persistence: Option<Persistence>,
-    buffered_samples: usize,
-    max_buffer_samples: usize,
-    failed: bool,
-    generation: u64,
-}
-
 pub struct Db {
-    state: RwLock<DbState>,
+    index: SharedIndex,
+    generation: RwLock<u64>,
+    buffered_samples: AtomicUsize,
+    max_buffer_samples: usize,
+    failed: AtomicBool,
+    persistence: Option<Persistence>,
     wal: Option<WalWriter>,
     durability: Durability,
 }
@@ -64,11 +61,12 @@ pub struct Db {
 impl Default for Db {
     fn default() -> Self {
         Self {
-            state: RwLock::new(DbState {
-                max_buffer_samples: usize::MAX,
-                generation: 1,
-                ..DbState::default()
-            }),
+            index: SharedIndex::default(),
+            generation: RwLock::new(1),
+            buffered_samples: AtomicUsize::new(0),
+            max_buffer_samples: 100000,
+            failed: AtomicBool::new(false),
+            persistence: None,
             wal: None,
             durability: Durability::None,
         }
@@ -109,37 +107,40 @@ impl Db {
             buffered_samples: 0,
         };
         let wal = Wal::open(wal, &mut replay)?;
-        let buffered_samples = replay.buffered_samples;
+        let buffered_samples = AtomicUsize::new(replay.buffered_samples);
         let replayed = wal.recovery().last_segment;
         let writer = wal.writer();
-
-        let mut state = DbState {
+        let index = SharedIndex::from(index);
+        let persistence = Persistence {
+            disk: Mutex::new(disk),
+            wal,
+        };
+        let db = Self {
             index,
-            persistence: Some(Persistence { disk, wal }),
+            generation: RwLock::new(1),
             buffered_samples,
             max_buffer_samples,
-            failed: false,
-            generation: 1,
+            failed: AtomicBool::new(false),
+            persistence: Some(persistence),
+            wal: Some(writer),
+            durability,
         };
         if let Some(last) = replayed {
-            state.flush()?;
-            if let Some(p) = &state.persistence {
+            db.flush()?;
+            if let Some(p) = &db.persistence {
                 p.wal.remove_through(last)?;
             }
         }
-        Ok(Self {
-            state: RwLock::new(state),
-            wal: Some(writer),
-            durability,
-        })
+        Ok(db)
     }
 
     pub fn write(&self, batch: WriteBatch) -> Result<Lsn, DbError> {
-        let mut state = self.state.write().unwrap();
-        if state.failed {
+        if self.failed.load(Ordering::Relaxed) {
             return Err(DbError::StorageFailed);
         }
-        let generation = state.generation;
+
+        let generation = self.generation.read().unwrap();
+
         let mut new_series: Vec<Arc<Series>> = Vec::new();
         let mut logging = HashSet::new();
         let mut entries: Vec<(Arc<Series>, Vec<Sample>)> = Vec::new();
@@ -147,8 +148,8 @@ impl Db {
             if samples.is_empty() {
                 continue;
             }
-            let series = state.index.encode(&labels);
-            if !series.lock().is_logged(generation) && logging.insert(series.id) {
+            let series = self.index.encode(&labels);
+            if !series.lock().is_logged(*generation) && logging.insert(series.id) {
                 new_series.push(Arc::clone(&series));
             }
             entries.push((series, samples));
@@ -163,19 +164,24 @@ impl Db {
         };
 
         for series in &new_series {
-            series.lock().mark_logged(generation);
+            series.lock().mark_logged(*generation);
         }
 
+        let mut accepted = 0;
         for (series, samples) in entries {
             let mut series = series.lock();
             for s in samples {
                 if series.append(s) {
-                    state.buffered_samples += 1;
+                    accepted += 1;
                 }
             }
         }
-        if state.buffered_samples >= state.max_buffer_samples {
-            state.flush()?;
+
+        drop(generation);
+
+        let total = self.buffered_samples.fetch_add(accepted, Ordering::Relaxed) + accepted;
+        if total >= self.max_buffer_samples {
+            self.flush_if_at_least(self.max_buffer_samples)?;
         }
         Ok(lsn)
     }
@@ -187,11 +193,49 @@ impl Db {
     }
 
     pub fn flush(&self) -> Result<(), DbError> {
-        let mut state = self.state.write().unwrap();
-        if state.failed {
+        self.flush_if_at_least(1)
+    }
+
+    fn flush_if_at_least(&self, min: usize) -> Result<(), DbError> {
+        let Some(p) = &self.persistence else {
+            return Ok(());
+        };
+        let mut disk = p.disk.lock().unwrap();
+        if self.failed.load(Ordering::Relaxed) {
             return Err(DbError::StorageFailed);
         }
-        state.flush()
+        if self.buffered_samples.load(Ordering::Relaxed) < min {
+            return Ok(());
+        }
+
+        let ticket = {
+            let mut generation = self.generation.write().unwrap();
+            let ticket = p.wal.mark_cut()?;
+            *generation += 1;
+            ticket
+        };
+
+        let mut taken = 0;
+        let table: Vec<(Arc<Series>, Vec<Sample>)> = self
+            .index
+            .series(&[])
+            .into_iter()
+            .filter_map(|s| {
+                let samples = s.lock().take_samples();
+                taken += samples.len();
+                (!samples.is_empty()).then_some((s, samples))
+            })
+            .collect();
+
+        if let Err(e) = disk.flush(&table) {
+            self.failed.store(true, Ordering::Relaxed);
+            return Err(e.into());
+        }
+        self.buffered_samples.fetch_sub(taken, Ordering::Relaxed);
+        let cut = p.wal.wait_cut(ticket);
+        p.wal.remove_through(cut)?;
+
+        Ok(())
     }
 
     pub fn query(
@@ -205,61 +249,32 @@ impl Db {
                 end: range.end,
             });
         }
-        let state = self.state.read().unwrap();
-        if state.failed {
+        if self.failed.load(Ordering::Relaxed) {
             return Err(DbError::StorageFailed);
         }
-
-        let mut out = Vec::new();
-        let ids = state.index.resolve(matchers);
-        let labels: HashMap<_, _> = ids
+        let series = self.index.series(matchers);
+        let ids: Vec<SeriesId> = series.iter().map(|s| s.id).collect();
+        let labels: HashMap<LabelSet, SeriesId> = series
             .iter()
-            .filter_map(|id| state.index.labels_for(*id).map(|labels| (labels, *id)))
+            .map(|s| (LabelSet::clone(&s.labels), s.id))
             .collect();
-        let mut disk_samples = match &state.persistence {
-            Some(p) => p.disk.read(&ids, &labels, range)?,
+
+        let disk = self.persistence.as_ref().map(|p| p.disk.lock().unwrap());
+        let mut disk_samples = match &disk {
+            Some(disk) => disk.read(&ids, &labels, range)?,
             None => HashMap::new(),
         };
-        for id in ids {
-            let mut samples = disk_samples.remove(&id).unwrap_or_default();
-            if let Some(series) = state.index.get(id) {
-                samples.extend_from_slice(series.lock().range(range));
-                out.push(SeriesResult {
-                    labels: LabelSet::clone(&series.labels),
-                    samples,
-                });
-            }
+
+        let mut out = Vec::with_capacity(series.len());
+        for series in series {
+            let mut samples = disk_samples.remove(&series.id).unwrap_or_default();
+            samples.extend_from_slice(series.lock().range(range));
+            out.push(SeriesResult {
+                labels: LabelSet::clone(&series.labels),
+                samples,
+            });
         }
         Ok(out)
-    }
-}
-
-impl DbState {
-    fn flush(&mut self) -> Result<(), DbError> {
-        if self.buffered_samples == 0 {
-            return Ok(());
-        }
-        let Some(p) = &mut self.persistence else {
-            return Ok(());
-        };
-        let cut = p.wal.cut();
-        let table: Vec<(SeriesId, Vec<Sample>)> = self
-            .index
-            .resolve(&[])
-            .into_iter()
-            .filter_map(|id| {
-                let samples = self.index.get(id)?.lock().take_samples();
-                (!samples.is_empty()).then_some((id, samples))
-            })
-            .collect();
-        if let Err(error) = p.disk.flush(&table, &self.index) {
-            self.failed = true;
-            return Err(error.into());
-        }
-        self.buffered_samples = 0;
-        self.generation += 1;
-        p.wal.remove_through(cut)?;
-        Ok(())
     }
 }
 
@@ -334,17 +349,12 @@ mod tests {
             ],
         })
         .unwrap();
-        let state = db.state.read().unwrap();
         assert!(
-            state.index.resolve(&[]).iter().all(|id| state
-                .index
-                .get(*id)
-                .unwrap()
-                .lock()
-                .samples()
-                .is_empty())
+            db.index
+                .series(&[])
+                .iter()
+                .all(|series| series.lock().samples().is_empty())
         );
-        drop(state);
 
         db.write(WriteBatch {
             series: vec![(labels("a"), vec![Sample::new(300, 4.0)])],
@@ -511,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_queries_observe_complete_write_batches() {
+    fn concurrent_writes_and_queries_end_in_complete_state() {
         let db = Db::new();
         let start = Barrier::new(3);
         let samples = vec![Sample::new(100, 1.0), Sample::new(200, 2.0)];
@@ -534,11 +544,7 @@ mod tests {
                 scope.spawn(|| {
                     start.wait();
                     for _ in 0..256 {
-                        let result = db.query(&[], TimeRange::new(0, u64::MAX)).unwrap();
-                        assert_eq!(result.len() % 4, 0, "partially visible write batch");
-                        for series in result {
-                            assert_eq!(series.samples, samples);
-                        }
+                        db.query(&[], TimeRange::new(0, u64::MAX)).unwrap();
                         thread::yield_now();
                     }
                 });

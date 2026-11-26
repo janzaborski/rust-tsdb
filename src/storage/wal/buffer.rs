@@ -14,11 +14,17 @@ struct Inner {
     buf: Vec<u8>,
     end: u64,
     closed: bool,
+    cut_at: Option<u64>,
 }
 
 pub(crate) struct Appended {
     pub lsn: Lsn,
     pub crossed_threshold: bool,
+}
+
+pub(crate) struct Taken {
+    pub end: Lsn,
+    pub cut: bool,
 }
 
 impl WalBuffer {
@@ -28,6 +34,7 @@ impl WalBuffer {
                 buf: Vec::with_capacity(capacity),
                 end: 0,
                 closed: false,
+                cut_at: None,
             }),
             flush_threshold,
         }
@@ -50,16 +57,34 @@ impl WalBuffer {
         })
     }
 
-    pub fn take(&self, spare: &mut Vec<u8>) -> Option<Lsn> {
+    pub fn take(&self, spare: &mut Vec<u8>) -> Option<Taken> {
         let mut g = self.inner.lock().unwrap();
 
-        if g.buf.is_empty() {
-            return None;
+        let Some(cut_at) = g.cut_at.take() else {
+            if g.buf.is_empty() {
+                return None;
+            }
+            mem::swap(&mut g.buf, spare);
+            return Some(Taken {
+                end: Lsn(g.end),
+                cut: false,
+            });
+        };
+
+        let len = g.buf.len();
+        let offset = (cut_at - (g.end - len as u64)) as usize;
+
+        if offset == len {
+            mem::swap(&mut g.buf, spare);
+        } else {
+            spare.extend_from_slice(&g.buf[..offset]);
+            g.buf.drain(..offset);
         }
 
-        mem::swap(&mut g.buf, spare);
-
-        Some(Lsn(g.end))
+        Some(Taken {
+            end: Lsn(cut_at),
+            cut: true,
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -76,5 +101,16 @@ impl WalBuffer {
 
     pub fn is_closed(&self) -> bool {
         self.inner.lock().unwrap().closed
+    }
+
+    pub fn mark_cut(&self) -> Result<Lsn, WalError> {
+        let mut g = self.inner.lock().unwrap();
+
+        if g.closed {
+            return Err(WalError::Closed);
+        }
+
+        g.cut_at = Some(g.end);
+        Ok(Lsn(g.end))
     }
 }

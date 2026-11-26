@@ -1,3 +1,4 @@
+use super::buffer::Taken;
 use super::lsn::Lsn;
 use super::segment::ActiveSegment;
 use super::{Shared, WalConfig};
@@ -14,45 +15,24 @@ pub(crate) struct Threads {
     syncer: Option<JoinHandle<()>>,
 }
 
-/// Handshake for `Wal::cut`: the caller asks the flusher to drain and rotate,
-/// then waits for the id of the segment it closed.
+/// Hands the id of the segment closed at a cut back to `Wal::wait_cut`.
 #[derive(Default)]
 pub(crate) struct Cut {
-    serial: Mutex<()>,
-    state: Mutex<CutState>,
+    state: Mutex<Option<u64>>,
     done: Condvar,
 }
 
-#[derive(Default)]
-struct CutState {
-    requested: bool,
-    closed: Option<u64>,
-}
-
 impl Cut {
-    fn is_requested(&self) -> bool {
-        self.state.lock().unwrap().requested
-    }
-
     fn finish(&self, closed: u64) {
         let mut st = self.state.lock().unwrap();
-        *st = CutState {
-            requested: false,
-            closed: Some(closed),
-        };
+        *st = Some(closed);
         self.done.notify_all();
     }
 
-    pub(crate) fn request(&self, kick: impl Fn()) -> u64 {
-        let _one_at_a_time = self.serial.lock().unwrap();
-        let mut st = self.state.lock().unwrap();
-        *st = CutState {
-            requested: true,
-            closed: None,
-        };
-        kick();
-        let mut st = self.done.wait_while(st, |s| s.closed.is_none()).unwrap();
-        st.closed.take().expect("set by finish")
+    pub(crate) fn wait(&self) -> u64 {
+        let st = self.state.lock().unwrap();
+        let mut st = self.done.wait_while(st, |s| s.is_none()).unwrap();
+        st.take().expect("set by finish")
     }
 }
 
@@ -103,10 +83,8 @@ impl Threads {
 
         loop {
             let closing = shared.buffer.is_closed();
-            let cutting = shared.cut.is_requested();
 
             if !closing
-                && !cutting
                 && !cfg.commit_delay.is_zero()
                 && progress.has_waiters()
                 && shared.buffer.len() < cfg.commit_bytes
@@ -115,19 +93,20 @@ impl Threads {
             }
 
             match shared.buffer.take(&mut spare) {
-                Some(end) => {
+                Some(Taken { end, cut }) => {
                     let n = spare.len();
 
-                    write_batch(shared, &mut seg, &mut spare, end, cfg);
-                    if closing || cutting || n >= cfg.flush_threshold || progress.has_waiters() {
+                    if n > 0 {
+                        write_batch(shared, &mut seg, &mut spare, end, cfg);
+                    }
+                    if cut {
+                        let closed = rotate(&mut seg, shared, cfg);
+                        shared.cut.finish(closed);
                         continue;
                     }
-                }
-                None if cutting => {
-                    let closed = rotate(&mut seg, shared, cfg);
-
-                    shared.cut.finish(closed);
-                    continue;
+                    if closing || n >= cfg.flush_threshold || progress.has_waiters() {
+                        continue;
+                    }
                 }
                 None if closing => break,
                 None => {}
