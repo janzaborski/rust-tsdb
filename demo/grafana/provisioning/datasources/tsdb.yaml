@@ -9,7 +9,8 @@ datasources:
     jsonData:
       httpMethod: POST
       timeInterval: 1s
-      disableMetricsLookup: true
+      disableMetricsLookup: false
+      seriesEndpoint: false
       prometheusType: Prometheus
       prometheusVersion: 2.50.0
       manageAlerts: false

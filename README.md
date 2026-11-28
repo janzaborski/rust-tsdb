@@ -52,13 +52,22 @@ receive/send bytes/s per interface.
 
 ## Grafana Queries
 
-In Grafana Explore, select **TSDB**, use **Code** mode and try:
+In Grafana Explore, select **TSDB**. Use the metric and label picker to browse
+the stored catalog. Suggestions cover the full catalog regardless of the
+selected time range. In **Code** mode, try these queries.
 
 ```promql
 pc_cpu_usage_percent{source="windows"}
 pc_memory_usage_percent{source="windows"}
 pc_disk_usage_percent{volume="C:"}
+avg_over_time(pc_cpu_usage_percent{source="windows"}[5m])
 ```
+
+The server uses a five-minute lookback for plain metric selectors by default.
+Use `--query-lookback-ms` to set the maximum sample age in milliseconds.
+For example, `cargo run -- --query-lookback-ms 5000` sets a five-second lookback.
+Use `0` to require an exact timestamp match. Functions such as
+`avg_over_time` use the window specified in the query.
 
 ## Development
 

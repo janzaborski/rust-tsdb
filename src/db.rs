@@ -242,6 +242,18 @@ impl Db {
         Ok(())
     }
 
+    pub(crate) fn catalog(&self, label: Option<&str>) -> Vec<String> {
+        self.index.catalog(label)
+    }
+
+    pub(crate) fn series_labels(&self, matchers: &[Matcher]) -> Vec<Arc<LabelSet>> {
+        self.index
+            .series(matchers)
+            .into_iter()
+            .map(|series| Arc::clone(&series.labels))
+            .collect()
+    }
+
     pub fn query(
         &self,
         matchers: &[Matcher],

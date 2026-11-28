@@ -228,6 +228,18 @@ impl SharedIndex {
             .collect()
     }
 
+    pub(crate) fn catalog(&self, label: Option<&str>) -> Vec<String> {
+        let index = self.read();
+        let entries = &index.postings.entries;
+        match label {
+            None => entries.keys().cloned().collect(),
+            Some(label) => entries
+                .get(label)
+                .map(|entry| entry.values.keys().cloned().collect())
+                .unwrap_or_default(),
+        }
+    }
+
     fn read(&self) -> RwLockReadGuard<'_, Index> {
         self.inner.read().unwrap()
     }

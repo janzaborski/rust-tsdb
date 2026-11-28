@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use tsdb::storage::wal::{Durability, WalConfig};
-use tsdb::{Db, router};
+use tsdb::{DEFAULT_QUERY_LOOKBACK_MS, Db, router_with_query_lookback};
 
 #[derive(Parser)]
 struct Args {
@@ -21,6 +21,10 @@ struct Args {
 
     #[arg(long, default_value = "none", value_parser = parse_durability)]
     durability: Durability,
+
+    /// Maximum age of a sample for plain metric selectors. Use 0 for exact timestamps.
+    #[arg(long, default_value_t = DEFAULT_QUERY_LOOKBACK_MS, value_name = "MILLISECONDS")]
+    query_lookback_ms: u64,
 }
 
 #[tokio::main]
@@ -36,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         WalConfig::new(wal_dir),
         args.durability,
     )?);
-    let app = router(db.clone());
+    let app = router_with_query_lookback(db.clone(), args.query_lookback_ms);
 
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
     tracing::info!("listening on {}", args.listen);

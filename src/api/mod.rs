@@ -8,7 +8,7 @@ use crate::db::{Db, DbError, SeriesResult, WriteBatch};
 use crate::model::{LabelSet, Matcher, MatcherOperator, Sample, TimeRange};
 use crate::storage::wal::WalError;
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     body::Bytes,
     extract::{DefaultBodyLimit, Query, State},
     http::{HeaderMap, StatusCode, header},
@@ -18,7 +18,15 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+pub const DEFAULT_QUERY_LOOKBACK_MS: u64 = 300_000;
+
 pub fn router(db: Arc<Db>) -> Router {
+    router_with_query_lookback(db, DEFAULT_QUERY_LOOKBACK_MS)
+}
+
+/// Builds the router with a plain metric selector lookback in milliseconds.
+/// Zero requires a sample at the evaluation timestamp.
+pub fn router_with_query_lookback(db: Arc<Db>, lookback_ms: u64) -> Router {
     Router::new()
         .route(
             "/api/v1/query",
@@ -29,11 +37,18 @@ pub fn router(db: Arc<Db>) -> Router {
             get(prom::range_get).post(prom::range_post),
         )
         .route("/api/v1/status/buildinfo", get(prom::buildinfo))
+        .route(
+            "/api/v1/labels",
+            get(prom::labels_get).post(prom::labels_post),
+        )
+        .route("/api/v1/label/{name}/values", get(prom::label_values))
+        .route("/api/v1/metadata", get(prom::metadata))
         .route("/healthz", get(|| async { StatusCode::OK }))
         .route("/readyz", get(prom::ready))
         .route("/api/v1/write", post(remote_write))
         .route("/debug/write_json", post(write_json))
         .route("/debug/read", get(read))
+        .layer(Extension(prom::QueryLookback(lookback_ms)))
         .layer(DefaultBodyLimit::max(decode::MAX_COMPRESSED))
         .with_state(db)
 }
