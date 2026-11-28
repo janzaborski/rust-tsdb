@@ -2,11 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::model::{LabelSet, Sample, SeriesId, TimeRange};
-use crate::storage::{Index, StorageError};
+use crate::storage::{Index, Series, StorageError};
 
 const MAGIC: &[u8; 8] = b"MiNItsDB";
 
@@ -94,21 +95,17 @@ impl SegmentStore {
         ))
     }
 
-    pub fn flush(
-        &mut self,
-        series: &[(SeriesId, Vec<Sample>)],
-        index: &Index,
-    ) -> Result<(), StorageError> {
+    pub fn flush(&mut self, series: &[(Arc<Series>, Vec<Sample>)]) -> Result<(), StorageError> {
         if series.is_empty() {
             return Ok(());
         }
         let mut entries: Vec<_> = series.iter().collect();
-        entries.sort_by_key(|(id, _)| id.0);
+        entries.sort_by_key(|(series, _)| series.id);
         let segment = Segment {
             series: entries
-                .into_iter()
-                .map(|(id, samples)| DiskSeries {
-                    labels: index.labels_for(*id).expect("indexed series"),
+                .iter()
+                .map(|(series, samples)| DiskSeries {
+                    labels: LabelSet::clone(&series.labels),
                     samples: samples
                         .iter()
                         .map(|sample| (sample.timestamp, sample.value.to_bits()))
@@ -135,14 +132,12 @@ impl SegmentStore {
         fs::rename(&temporary, &final_path)?;
         File::open(&self.dir)?.sync_all()?;
 
-        let ranges = segment
-            .series
+        let ranges = entries
             .iter()
-            .map(|series| {
-                let id = index.id_for(&series.labels).expect("indexed series");
-                let first = series.samples.first().expect("nonempty series").0;
-                let last = series.samples.last().expect("nonempty series").0;
-                (id, (first, last))
+            .map(|(series, samples)| {
+                let first = samples.first().expect("nonempty series").timestamp;
+                let last = samples.last().expect("nonempty series").timestamp;
+                (series.id, (first, last))
             })
             .collect();
         self.segments.push(SegmentMeta {
@@ -154,7 +149,6 @@ impl SegmentStore {
             .ok_or_else(|| StorageError::CorruptSegment("segment number overflow".into()))?;
         Ok(())
     }
-
     pub fn read(
         &self,
         ids: &[SeriesId],

@@ -1,17 +1,72 @@
-use std::borrow::Cow;
+use std::cmp::{Ordering, Reverse};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::model::{LabelSet, Matcher, MatcherOperator, SeriesId};
 use crate::storage::series::Series;
 
 #[derive(Default)]
+struct NameEntry {
+    values: HashMap<String, Vec<SeriesId>>,
+    any: Vec<SeriesId>,
+}
+
+impl NameEntry {
+    fn insert(&mut self, value: &str, id: SeriesId) {
+        if let Some(ids) = self.values.get_mut(value) {
+            ids.push(id);
+        } else {
+            self.values.insert(value.to_owned(), vec![id]);
+        }
+
+        self.any.push(id);
+    }
+}
+
+#[derive(Default)]
+struct Postings {
+    entries: HashMap<String, NameEntry>,
+    all: Vec<SeriesId>,
+}
+
+impl Postings {
+    fn add_series(&mut self, id: SeriesId, labels: &LabelSet) {
+        for (name, value) in labels {
+            if let Some(entry) = self.entries.get_mut(name) {
+                entry.insert(value, id);
+            } else {
+                self.entries
+                    .entry(name.to_owned())
+                    .or_default()
+                    .insert(value, id);
+            }
+        }
+
+        self.all.push(id);
+    }
+
+    fn exact(&self, name: &str, value: &str) -> &[SeriesId] {
+        self.entries
+            .get(name)
+            .and_then(|entry| entry.values.get(value))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    fn any(&self, name: &str) -> &[SeriesId] {
+        self.entries
+            .get(name)
+            .map(|entry| entry.any.as_slice())
+            .unwrap_or(&[])
+    }
+}
+
+#[derive(Default)]
 pub struct Index {
-    inverted: HashMap<LabelSet, Arc<Series>>,
     forward: HashMap<SeriesId, Arc<Series>>,
-    posting_index: HashMap<String, HashMap<String, Vec<SeriesId>>>,
-    all_ids: Vec<SeriesId>,
-    next_id: SeriesId,
+    inverted: HashMap<Arc<LabelSet>, Arc<Series>>,
+    postings: Postings,
+    next_id: u64,
 }
 
 impl Index {
@@ -19,155 +74,176 @@ impl Index {
         Self::default()
     }
 
-    fn candidates(&self, matcher: &Matcher) -> Cow<'_, [SeriesId]> {
-        match matcher.operator {
-            MatcherOperator::Equal => self
-                .posting_index
-                .get(&matcher.name)
-                .and_then(|values| values.get(&matcher.value))
-                .map(|ids| Cow::Borrowed(ids.as_slice()))
-                .unwrap_or(Cow::Owned(Vec::new())),
-
-            MatcherOperator::NotEqual => {
-                let values = self.posting_index.get(&matcher.name);
-                let with_label: Vec<SeriesId> = values.map(union_all).unwrap_or_default();
-                let with_this_value: &[SeriesId] = values
-                    .and_then(|v| v.get(&matcher.value))
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
-
-                let mut result = difference_sorted(&with_label, with_this_value);
-
-                if !matcher.value.is_empty() {
-                    let without_label = difference_sorted(&self.all_ids, &with_label);
-                    result = union_sorted(&result, &without_label);
-                }
-                Cow::Owned(result)
-            }
-        }
+    pub fn lookup(&self, labels: &LabelSet) -> Option<Arc<Series>> {
+        self.inverted.get(labels).cloned()
     }
-}
 
-impl Index {
     pub fn encode(&mut self, labels: &LabelSet) -> Arc<Series> {
-        if let Some(series) = self.inverted.get(labels) {
-            return Arc::clone(series);
+        if let Some(series) = self.lookup(labels) {
+            return series;
         }
 
-        let id = self.next_id;
-        self.next_id.0 += 1;
+        self.create_series(labels)
+    }
+
+    fn create_series(&mut self, labels: &LabelSet) -> Arc<Series> {
+        let id = SeriesId(self.next_id);
+        self.next_id += 1;
 
         let series = Arc::new(Series::new(id, Arc::new(labels.clone())));
-        self.inverted.insert(labels.clone(), Arc::clone(&series));
         self.forward.insert(id, Arc::clone(&series));
-        self.all_ids.push(id);
-
-        for (name, value) in labels {
-            self.posting_index
-                .entry(name.into())
-                .or_default()
-                .entry(value.into())
-                .or_default()
-                .push(id);
-        }
+        self.inverted
+            .insert(Arc::clone(&series.labels), Arc::clone(&series));
+        self.postings.add_series(id, labels);
 
         series
     }
 
-    /// On empty matchers returns all series ids.
-    pub fn resolve(&self, matchers: &[Matcher]) -> Vec<SeriesId> {
-        if matchers.is_empty() {
-            return self.all_ids.clone();
-        }
-
-        let mut iter = matchers.iter();
-        let mut candidates: Cow<[SeriesId]> = self.candidates(iter.next().unwrap());
-
-        for m in iter {
-            let this_set = self.candidates(m);
-            intersect_in_place(candidates.to_mut(), &this_set);
-            if candidates.is_empty() {
-                return Vec::new();
-            }
-        }
-
-        candidates.into_owned()
+    pub fn get(&self, id: SeriesId) -> Option<Arc<Series>> {
+        self.forward.get(&id).cloned()
     }
 
-    pub fn get(&self, id: SeriesId) -> Option<&Arc<Series>> {
-        self.forward.get(&id)
-    }
-
-    pub fn labels_for(&self, id: SeriesId) -> Option<LabelSet> {
+    pub fn labels_for(&self, id: SeriesId) -> Option<Arc<LabelSet>> {
         self.forward
             .get(&id)
-            .map(|series| LabelSet::clone(&series.labels))
+            .map(|series| Arc::clone(&series.labels))
     }
 
     pub fn id_for(&self, labels: &LabelSet) -> Option<SeriesId> {
         self.inverted.get(labels).map(|series| series.id)
     }
 
-    pub fn including_label(&self, label_name: &str) -> Vec<SeriesId> {
-        self.posting_index
-            .get(label_name)
-            .map(union_all)
-            .unwrap_or_default()
+    pub fn with_label(&self, name: &str) -> Vec<SeriesId> {
+        self.postings.any(name).to_vec()
+    }
+
+    /// On empty matchers returns all series ids.
+    pub fn resolve(&self, matchers: &[Matcher]) -> Vec<SeriesId> {
+        if matchers.is_empty() {
+            return self.postings.all.clone();
+        }
+
+        let mut intersectors: Vec<&[SeriesId]> = Vec::new();
+        let mut excluders: Vec<&[SeriesId]> = Vec::new();
+
+        for matcher in matchers {
+            let (name, value) = (matcher.name.as_str(), matcher.value.as_str());
+            match (matcher.operator, value.is_empty()) {
+                (MatcherOperator::Equal, true) => excluders.push(self.postings.any(name)),
+                (MatcherOperator::Equal, false) => {
+                    intersectors.push(self.postings.exact(name, value))
+                }
+                (MatcherOperator::NotEqual, true) => intersectors.push(self.postings.any(name)),
+                (MatcherOperator::NotEqual, false) => {
+                    excluders.push(self.postings.exact(name, value))
+                }
+            }
+        }
+
+        if intersectors.iter().any(|ids| ids.is_empty()) {
+            return Vec::new();
+        }
+
+        intersectors.sort_unstable_by_key(|ids| ids.len());
+        excluders.sort_unstable_by_key(|ids| Reverse(ids.len()));
+
+        let mut result = intersectors
+            .first()
+            .map_or_else(|| self.postings.all.clone(), |ids| ids.to_vec());
+
+        for ids in intersectors.iter().skip(1) {
+            intersect_in_place(&mut result, ids);
+            if result.is_empty() {
+                return result;
+            }
+        }
+
+        for ids in excluders {
+            subtract_in_place(&mut result, ids);
+            if result.is_empty() {
+                return result;
+            }
+        }
+
+        result
     }
 }
 
-fn union_sorted(a: &[SeriesId], b: &[SeriesId]) -> Vec<SeriesId> {
-    let mut result = Vec::with_capacity(a.len() + b.len());
-    let (mut i, mut j) = (0, 0);
-    while i < a.len() && j < b.len() {
-        match a[i].0.cmp(&b[j].0) {
-            std::cmp::Ordering::Less => {
-                result.push(a[i]);
-                i += 1;
-            }
-            std::cmp::Ordering::Greater => {
-                result.push(b[j]);
-                j += 1;
-            }
-            std::cmp::Ordering::Equal => {
-                result.push(a[i]);
-                i += 1;
-                j += 1;
-            }
-        }
-    }
-    result.extend_from_slice(&a[i..]);
-    result.extend_from_slice(&b[j..]);
-    result
+#[derive(Default)]
+pub struct SharedIndex {
+    inner: RwLock<Index>,
 }
 
-fn difference_sorted(a: &[SeriesId], b: &[SeriesId]) -> Vec<SeriesId> {
-    let mut result = Vec::with_capacity(a.len());
-    let (mut i, mut j) = (0, 0);
-    while i < a.len() && j < b.len() {
-        match a[i].0.cmp(&b[j].0) {
-            std::cmp::Ordering::Less => {
-                result.push(a[i]);
-                i += 1;
-            }
-            std::cmp::Ordering::Greater => j += 1,
-            std::cmp::Ordering::Equal => {
-                i += 1;
-                j += 1;
-            }
+impl From<Index> for SharedIndex {
+    fn from(index: Index) -> Self {
+        Self {
+            inner: RwLock::new(index),
         }
     }
-    result.extend_from_slice(&a[i..]);
-    result
+}
+
+impl SharedIndex {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn lookup(&self, labels: &LabelSet) -> Option<Arc<Series>> {
+        self.read().lookup(labels)
+    }
+
+    pub fn encode(&self, labels: &LabelSet) -> Arc<Series> {
+        if let Some(series) = self.lookup(labels) {
+            return series;
+        }
+
+        self.write().encode(labels)
+    }
+
+    pub fn get(&self, id: SeriesId) -> Option<Arc<Series>> {
+        self.read().get(id)
+    }
+
+    pub fn labels_for(&self, id: SeriesId) -> Option<Arc<LabelSet>> {
+        self.read().labels_for(id)
+    }
+
+    pub fn id_for(&self, labels: &LabelSet) -> Option<SeriesId> {
+        self.read().id_for(labels)
+    }
+
+    pub fn with_label(&self, name: &str) -> Vec<SeriesId> {
+        self.read().with_label(name)
+    }
+
+    pub fn resolve(&self, matchers: &[Matcher]) -> Vec<SeriesId> {
+        self.read().resolve(matchers)
+    }
+
+    pub fn series(&self, matchers: &[Matcher]) -> Vec<Arc<Series>> {
+        let index = self.read();
+        index
+            .resolve(matchers)
+            .into_iter()
+            .filter_map(|id| index.get(id))
+            .collect()
+    }
+
+    fn read(&self) -> RwLockReadGuard<'_, Index> {
+        self.inner.read().unwrap()
+    }
+
+    fn write(&self) -> RwLockWriteGuard<'_, Index> {
+        self.inner.write().unwrap()
+    }
 }
 
 fn intersect_in_place(a: &mut Vec<SeriesId>, b: &[SeriesId]) {
     let (mut write, mut i, mut j) = (0, 0, 0);
     while i < a.len() && j < b.len() {
-        match a[i].0.cmp(&b[j].0) {
-            std::cmp::Ordering::Less => i += 1,
-            std::cmp::Ordering::Greater => j += 1,
-            std::cmp::Ordering::Equal => {
+        match a[i].cmp(&b[j]) {
+            Ordering::Less => i += 1,
+            Ordering::Greater => j += 1,
+            Ordering::Equal => {
                 a[write] = a[i];
                 write += 1;
                 i += 1;
@@ -178,10 +254,25 @@ fn intersect_in_place(a: &mut Vec<SeriesId>, b: &[SeriesId]) {
     a.truncate(write);
 }
 
-fn union_all(values: &HashMap<String, Vec<SeriesId>>) -> Vec<SeriesId> {
-    values
-        .values()
-        .fold(Vec::new(), |acc, v| union_sorted(&acc, v))
+fn subtract_in_place(a: &mut Vec<SeriesId>, b: &[SeriesId]) {
+    let (mut write, mut i, mut j) = (0, 0, 0);
+    while i < a.len() && j < b.len() {
+        match a[i].cmp(&b[j]) {
+            Ordering::Less => {
+                a[write] = a[i];
+                write += 1;
+                i += 1;
+            }
+            Ordering::Greater => j += 1,
+            Ordering::Equal => {
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    let tail = a.len() - i;
+    a.copy_within(i.., write);
+    a.truncate(write + tail);
 }
 
 #[cfg(test)]
@@ -269,9 +360,16 @@ mod tests {
         let id_b = index.encode(&ls_b).id; // duplicate labels -> same id, no new entries
 
         assert_eq!(id_a, id_b);
-        assert_eq!(index.all_ids, vec![id_a]);
+        assert_eq!(index.postings.all, vec![id_a]);
         assert_eq!(
-            index.posting_index.get("host").unwrap().get("a").unwrap(),
+            index
+                .postings
+                .entries
+                .get("host")
+                .unwrap()
+                .values
+                .get("a")
+                .unwrap(),
             &vec![id_a]
         );
     }
@@ -380,7 +478,7 @@ mod tests {
         let ls = label_set(&[("__name__", "cpu"), ("host", "a")]);
         let id = index.encode(&ls).id;
 
-        assert_eq!(index.labels_for(id), Some(ls));
+        assert_eq!(index.labels_for(id), Some(Arc::new(ls)));
     }
 
     #[test]
@@ -397,7 +495,7 @@ mod tests {
         let id_a = index.encode(&ls_a).id;
         let id_b = index.encode(&ls_b).id;
 
-        let mut result = index.including_label("host");
+        let mut result = index.with_label("host");
         result.sort_by_key(|id| id.0);
 
         assert_eq!(result, vec![id_a, id_b]);
@@ -409,7 +507,7 @@ mod tests {
         let ls = label_set(&[("__name__", "cpu")]);
         index.encode(&ls);
 
-        assert!(index.including_label("nonexistent").is_empty());
+        assert!(index.with_label("nonexistent").is_empty());
     }
 
     #[test]
@@ -498,8 +596,8 @@ mod tests {
 
         // In the universe, no posting entries, reachable only via an empty query.
         assert_eq!(index.resolve(&[]), vec![id]);
-        assert_eq!(index.labels_for(id), Some(LabelSet::default()));
-        assert!(index.posting_index.is_empty());
+        assert_eq!(index.labels_for(id), Some(Arc::new(LabelSet::default())));
+        assert!(index.postings.entries.is_empty());
     }
 
     #[test]

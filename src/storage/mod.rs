@@ -7,7 +7,7 @@ pub mod segment;
 pub mod series;
 pub mod wal;
 
-pub use index::Index;
+pub use index::{Index, SharedIndex};
 pub use series::Series;
 
 #[derive(Error, Debug)]

@@ -71,6 +71,8 @@ pub struct Wal {
     recovery: RecoveryReport,
 }
 
+pub struct CutTicket(Lsn);
+
 impl Wal {
     pub fn open(config: WalConfig, sink: &mut impl ReplaySink) -> Result<Self, WalError> {
         let dir_existed = config.dir.exists();
@@ -108,10 +110,19 @@ impl Wal {
         WalWriter::new(Arc::clone(&self.shared))
     }
 
-    pub fn cut(&self) -> u64 {
-        self.shared
-            .cut
-            .request(|| self.shared.progress.unpark_flusher())
+    pub fn mark_cut(&self) -> Result<CutTicket, WalError> {
+        let lsn = self.shared.buffer.mark_cut()?;
+        self.shared.progress.unpark_flusher();
+
+        Ok(CutTicket(lsn))
+    }
+
+    pub fn wait_cut(&self, _ticket: CutTicket) -> u64 {
+        self.shared.cut.wait()
+    }
+
+    pub fn cut(&self) -> Result<u64, WalError> {
+        Ok(self.wait_cut(self.mark_cut()?))
     }
 
     pub fn remove_through(&self, id: u64) -> Result<usize, WalError> {
@@ -147,6 +158,12 @@ impl Drop for Wal {
     fn drop(&mut self) {
         self.shared.buffer.close();
         let _ = self.threads.join();
+    }
+}
+
+impl CutTicket {
+    pub fn lsn(&self) -> Lsn {
+        self.0
     }
 }
 

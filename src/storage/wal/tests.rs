@@ -181,7 +181,7 @@ fn cut_and_remove_drop_only_what_came_before() {
         let w = wal.writer();
         w.append([(SeriesId(1), &labels("a"))], [(SeriesId(1), &[s(1)][..])])
             .unwrap();
-        let cut = wal.cut();
+        let cut = wal.cut().unwrap();
         w.append([(SeriesId(1), &labels("a"))], [(SeriesId(1), &[s(2)][..])])
             .unwrap();
         wal.remove_through(cut).unwrap();
